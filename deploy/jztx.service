@@ -1,0 +1,30 @@
+[Unit]
+Description=门店任务管理平台 (JZTX Task Platform)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/jztx
+
+# 只绑本机 —— 外网一律经 nginx 的 /jztx/ 回源，绝不直接暴露 8789
+Environment=HOST=127.0.0.1
+Environment=PORT=8789
+# 挂在 nginx 子路径：只影响「返回给浏览器的图片地址」，后端路由不变
+Environment=BASE_PATH=/jztx
+Environment=NODE_ENV=production
+Environment=TZ=Asia/Shanghai
+
+# 用 Node 22（系统 /usr/bin/node 是 18，better-sqlite3 的原生二进制按 ABI 编译，必须锁定版本）
+ExecStart=/opt/node-v22.14.0-linux-x64/bin/node /opt/jztx/src/server.js
+
+Restart=always
+RestartSec=5
+# 1.6G 内存的小机器：给 Node 留出生空间，避免堆涨到触发 OOM
+Environment=NODE_OPTIONS=--max-old-space-size=768
+
+StandardOutput=append:/opt/jztx/logs/server.log
+StandardError=append:/opt/jztx/logs/server.err.log
+
+[Install]
+WantedBy=multi-user.target

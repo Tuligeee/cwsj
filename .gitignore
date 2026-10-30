@@ -1,0 +1,14 @@
+# 依赖
+node_modules/
+# 数据与密钥（绝不入库）
+data/
+logs/
+backups/
+.ding.env
+.env
+*.db
+*.db-shm
+*.db-wal
+# 编辑备份
+*.bak-*
+*.bak

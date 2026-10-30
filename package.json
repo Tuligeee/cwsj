@@ -1,0 +1,24 @@
+{
+  "name": "cwsj-task-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "门店任务管理平台 - 后端",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node src/seed.js",
+    "test:reset": "node tests/reset-fixtures.js",
+    "test:e2e": "bash tests/run-e2e.sh",
+    "seed:real": "node scripts/pull_dingtalk_org.js && node scripts/build_real_seed.js",
+    "contacts:sync": "node scripts/sync_contacts.js",
+    "accounts:export": "node scripts/export_accounts.js",
+    "grant:owner": "node scripts/grant_owner.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.5.0",
+    "express": "^4.21.1",
+    "jsonwebtoken": "^9.0.2",
+    "xlsx": "^0.18.5"
+  }
+}

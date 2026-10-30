@@ -1,0 +1,30 @@
+[Unit]
+Description=门店任务管理平台 (CWSJ Task Platform)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/cwsj
+
+# 只绑本机 —— 外网一律经 nginx 的 /cwsj/ 回源，绝不直接暴露 8789
+Environment=HOST=127.0.0.1
+Environment=PORT=8789
+# 注意：这里**不要**设 BASE_PATH。上传地址的前缀统一由前端 api.js 拼，
+# 服务端返回不带前缀的 /uploads/xxx；两边都拼会变成 /cwsj/cwsj/... → 图片 404（2026-10-22 踩过）
+Environment=NODE_ENV=production
+Environment=TZ=Asia/Shanghai
+
+# 用 Node 22（系统 /usr/bin/node 是 18，better-sqlite3 的原生二进制按 ABI 编译，必须锁定版本）
+ExecStart=/opt/node-v22.14.0-linux-x64/bin/node /opt/cwsj/src/server.js
+
+Restart=always
+RestartSec=5
+# 1.6G 内存的小机器：给 Node 留出生空间，避免堆涨到触发 OOM
+Environment=NODE_OPTIONS=--max-old-space-size=768
+
+StandardOutput=append:/opt/cwsj/logs/server.log
+StandardError=append:/opt/cwsj/logs/server.err.log
+
+[Install]
+WantedBy=multi-user.target
