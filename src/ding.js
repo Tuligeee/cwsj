@@ -139,4 +139,29 @@ async function fetchAllPeople() {
   return { people: Array.from(people.values()), deptCount: depts.length + 1 };
 }
 
-module.exports = { loadEnv, getToken, sendSingle, fetchAllPeople, ENV_FILE };
+/* 发送 Markdown 单聊消息（标题 + 正文，钉钉 sampleMarkdown） */
+async function sendMarkdown(dingUserId, title, text) {
+  try {
+    const env = loadEnv();
+    const tok = await getToken();
+    const r = await fetch(API2 + '/v1.0/robot/oToMessages/batchSend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-acs-dingtalk-access-token': tok },
+      body: JSON.stringify({
+        robotCode: env.DINGTALK_ROBOT_CODE,
+        userIds: [dingUserId],
+        msgKey: 'sampleMarkdown',
+        msgParam: JSON.stringify({ title: title, text: text }),
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, reason: 'HTTP ' + r.status + ' ' + JSON.stringify(j).slice(0, 200) };
+    const bad = (j.invalidStaffIdList || []).concat(j.filteredStaffIdList || []);
+    if (bad.length) return { ok: false, reason: '收件人无效：' + bad.join(',') };
+    return { ok: true, key: j.processQueryKey || '' };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
+module.exports = { loadEnv, getToken, sendSingle, sendMarkdown, fetchAllPeople, ENV_FILE };

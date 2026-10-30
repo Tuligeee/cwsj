@@ -357,6 +357,55 @@ app.post('/api/ding/refresh', requireAuth, async (req, res) => {
   }
 });
 
+/* ---------------- 钉钉提醒引擎（默认预演，不发送） ---------------- */
+const notify = require('./notify');
+
+app.get('/api/notify/preview', requireAuth, (req, res) => {
+  if (!req.actor.isAdmin) return res.status(403).json({ ok: false, msg: '只有管理员可以查看提醒' });
+  const r = notify.scan({ dry: true });
+  res.json({ ok: true, total: r.total, queued: r.queued, quiet: r.quiet, rows: r.rows, cfg: notify.cfg(), stats: notify.stats() });
+});
+
+app.get('/api/notify/log', requireAuth, (req, res) => {
+  if (!req.actor.isAdmin) return res.status(403).json({ ok: false, msg: '只有管理员可以查看提醒' });
+  res.json({ ok: true, rows: notify.list(Number(req.query.limit) || 50), cfg: notify.cfg(), stats: notify.stats() });
+});
+
+app.post('/api/notify/config', requireAuth, (req, res) => {
+  if (!req.actor.isAdmin) return res.status(403).json({ ok: false, msg: '只有管理员可以修改提醒配置' });
+  const b = req.body || {};
+  const patch = {};
+  if (b.dry !== undefined) patch.dry = b.dry ? 1 : 0;
+  if (b.enabled !== undefined) patch.enabled = b.enabled ? 1 : 0;
+  if (b.maxPerDay !== undefined) patch.max_per_day = Number(b.maxPerDay) || 10;
+  notify.setCfg(patch);
+  log(req.actor.id, 'notify.config', JSON.stringify(patch));
+  res.json({ ok: true, cfg: notify.cfg() });
+});
+
+app.post('/api/notify/clear-dry', requireAuth, (req, res) => {
+  if (!req.actor.isAdmin) return res.status(403).json({ ok: false, msg: '只有管理员可以清理预演记录' });
+  const n = notify.clearDry();
+  log(req.actor.id, 'notify.clearDry', String(n));
+  res.json({ ok: true, cleared: n });
+});
+
+app.post('/api/notify/flush', requireAuth, async (req, res) => {
+  if (!req.actor.isAdmin) return res.status(403).json({ ok: false, msg: '只有管理员可以发送' });
+  const r = await notify.flush();
+  log(req.actor.id, 'notify.flush', JSON.stringify(r));
+  res.json(r);
+});
+
+/* 定时扫描：默认关闭（enabled=0），开启后每分钟跑一次 */
+setInterval(() => {
+  try {
+    const cfg2 = notify.cfg();
+    if (!cfg2.enabled) return;
+    notify.scan({});
+  } catch (e) { console.error('notify.tick', e.message); }
+}, 60000);
+
 /* ---------------- 任务资源接口（测试环境拆表第一步） ---------------- */
 require('./tasks_api').register(app, requireAuth, log);
 require('./demands_api').register(app, requireAuth, log);
@@ -645,8 +694,12 @@ app.post('/api/record/submit', requireAuth, (req, res) => {
   }
 
   const next = st.version + 1;
+  const _beforeSync = (function () { try { return require('./changelog').capture(state); } catch (e) { return null; } })();
   db.prepare("UPDATE state_doc SET version = ?, data = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE id = 1")
     .run(next, JSON.stringify(state), req.actor.id);
+  /* 关键：原子接口也必须镜像到拆表，否则页面（读拆表）看不到这条记录（2026-10-30 线上事故） */
+  try { split.syncToTables(state); } catch (e) { console.error('split.sync.fail', e.message); }
+  if (_beforeSync) { try { require('./changelog').commit(_beforeSync, state, req.actor.id); } catch (e) {} }
   log(req.actor.id, 'record.submit', `${taskId}/${key}${late ? ' 逾期' : ''}`);
   res.json({ ok: true, record: rec, version: next });
 });
@@ -667,8 +720,12 @@ app.post('/api/record/revoke', requireAuth, (req, res) => {
   if (state.records.length === before) return res.status(404).json({ ok: false, msg: '没有找到这条提交记录' });
 
   const next = st.version + 1;
+  const _beforeSync = (function () { try { return require('./changelog').capture(state); } catch (e) { return null; } })();
   db.prepare("UPDATE state_doc SET version = ?, data = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE id = 1")
     .run(next, JSON.stringify(state), req.actor.id);
+  /* 关键：原子接口也必须镜像到拆表，否则页面（读拆表）看不到这条记录（2026-10-30 线上事故） */
+  try { split.syncToTables(state); } catch (e) { console.error('split.sync.fail', e.message); }
+  if (_beforeSync) { try { require('./changelog').commit(_beforeSync, state, req.actor.id); } catch (e) {} }
   log(req.actor.id, 'record.revoke', `${taskId}/${periodKey}`);
   res.json({ ok: true, version: next });
 });

@@ -40,14 +40,18 @@ status)
   echo "服务状态 : $(systemctl is-active "$SERVICE")"
   echo "健康检查 : $(health)"
   echo "最近提交 : $(git log -1 --pretty='%h %s')"
+  echo "部署历史 : $(tail -3 "$APP/data/deploy-history.log" 2>/dev/null | tr '\n' ' ' || echo 无)"
   ;;
 
 rollback)
-  git fetch -q --tags
+  HIST="$APP/data/deploy-history.log"
+  [ -f "$HIST" ] || { echo "还没有部署历史（先执行一次 deploy <版本>）"; exit 1; }
   CUR="$(cur_tag)"
-  PREV="$(git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags | grep -v "^${CUR}$" | head -1)"
+  # 历史里最后一个不是当前版本的标签，才是"上一版"
+  PREV="$(awk '{print $1}' "$HIST" | awk -v cur="$CUR" '$0!=cur' | tail -1)"
+  [ -n "$PREV" ] || PREV="$(awk '{print $1}' "$HIST" | tail -2 | head -1)"
   [ -n "$PREV" ] || { echo "没有上一个版本可退"; exit 1; }
-  log "回退：$CUR → $PREV"
+  log "回退：$CUR → $PREV（依据部署历史）"
   exec "$0" "$PREV"
   ;;
 
@@ -126,6 +130,8 @@ rollback)
   '
 
   trap - ERR
+  mkdir -p "$APP/data"
+  echo "$TAG $(date +%Y-%m-%dT%H:%M:%S)" >> "$APP/data/deploy-history.log"
   log "完成：现在线上是 $TAG"
   echo "  备份目录: $BK_ROOT/deploy-$TAG-$TS"
   echo "  如需回退: $0 rollback"
