@@ -110,6 +110,41 @@ function renderUserChip() {
 }
 
 /* ---------------- 路由 ---------------- */
+/* ---------- 深链接：钉钉消息里的 #task=<id> / #demand=<id> ---------- */
+function applyDeepLink() {
+  const m = (location.hash || '').match(/^#(task|demand)=(.+)$/);
+  if (!m) return;
+  if (!me) { setTimeout(applyDeepLink, 500); return; }   /* 还没登录/还没拉到数据，稍后再试 */
+  const kind = m[1];
+  const id = decodeURIComponent(m[2]);
+  const storeSide = isStore();
+  try {
+    go(kind === 'task' ? (storeSide ? 'tasks' : 'hq-tasks') : (storeSide ? 'demands' : 'hq-demands'));
+  } catch (e) { return; }
+  const attr = kind === 'task' ? 'taskId' : 'demandId';
+  const sel = kind === 'task' ? '[data-task-id]' : '[data-demand-id]';
+  let tries = 0;
+  const tick = () => {
+    const el = Array.prototype.slice.call(document.querySelectorAll(sel)).find(n => n.dataset[attr] === id);
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('deep-hit');
+      setTimeout(() => el.classList.remove('deep-hit'), 5000);
+      /* 直接从消息点进来 → 打开详情弹窗（点卡片自带的按钮，各角色行为一致） */
+      try {
+        const btn = Array.prototype.slice.call(el.querySelectorAll('button'))
+          .find(b => /详情|进度明细|查看/.test(b.textContent));
+        if (btn) btn.click();
+        else el.click();
+      } catch (e) {}
+      return;
+    }
+    if (tries++ < 16) setTimeout(tick, 250);
+  };
+  setTimeout(tick, 350);
+}
+window.addEventListener('hashchange', applyDeepLink);
+
 function go(id, silent) {
   currentRoute = id;
   const routes = ROUTES[isStore() ? 'store' : 'hq'];
@@ -289,6 +324,7 @@ function renderLogin() {
       }
     }
     renderApp();
+    setTimeout(applyDeepLink, 400);
     toast('欢迎回来，' + r.user.name, 'ok');
     if (r.mustChangePwd) setTimeout(() => toast('当前仍是初始密码，建议尽快修改', 'err'), 1500);
   }
@@ -428,7 +464,7 @@ async function boot() {
 
   loadState();
   bindTopbar();
-  if (restoreSession()) renderApp();
+  if (restoreSession()) { renderApp(); setTimeout(applyDeepLink, 700); }
   else renderLogin();
   setInterval(() => { if (me) refreshBell(); }, 60000);
 }

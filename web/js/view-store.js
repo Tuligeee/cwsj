@@ -19,7 +19,7 @@ function renderTaskCard(item, opts) {
   opts = opts || {};
   const t = item.task;
   const m = STATUS_META[item.status] || STATUS_META.normal;
-  const card = h('div', { class: 'task-card ' + m.cls });
+  const card = h('div', { class: 'task-card ' + m.cls, dataset: { taskId: t.id || '' } });
 
   /* 头部 */
   const meta = h('div', { class: 'tc-meta' }, [
@@ -269,6 +269,7 @@ function renderDemandCard(d, opts) {
   const st = DEMAND_STATUS[d.status] || DEMAND_STATUS.pending;
   const card = h('div', {
     class: 'demand-card ' + st.cls,
+    dataset: { demandId: d.id || '' },
     style: opts.clickable === false ? null : { cursor: 'pointer' },
     onclick: opts.onClick
   });

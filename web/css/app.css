@@ -828,3 +828,15 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 }
 .btn-del-task:hover{ opacity: .88; }
 .btn-del-task:active{ opacity: .78; }
+
+/* 钉钉深链接定位到的那条卡片（高亮 5 秒） */
+.deep-hit{
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(79,107,237,.14);
+  animation: deepPulse 1.2s ease-in-out 2;
+}
+@keyframes deepPulse{
+  0%,100%{ box-shadow: 0 0 0 6px rgba(79,107,237,.14); }
+  50%{ box-shadow: 0 0 0 12px rgba(79,107,237,.05); }
+}

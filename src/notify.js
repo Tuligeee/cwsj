@@ -129,7 +129,9 @@ function build(now) {
   const firstRunA1 = !db.prepare("SELECT 1 FROM notify_log WHERE scenario='A1' LIMIT 1").get();
   const out = [];
   const push = (o) => out.push(o);
-  const link = (hash) => LINK_BASE + (hash || '');
+  const link = () => LINK_BASE;
+  const taskLink = (id) => LINK_BASE + '#task=' + encodeURIComponent(id);
+  const demandLink = (id) => LINK_BASE + '#demand=' + encodeURIComponent(id);
   const records = state.records || [];
 
   /* ---- A 组：任务 ---- */
@@ -160,7 +162,7 @@ function build(now) {
               '- 任务：' + task.title,
               '- 截止：' + dueText,
               '- 门店：' + store.name, '',
-              '[立即查看并提交](' + link() + ')'].join('\n'),
+              '[立即查看并提交](' + taskLink(task.id) + ')'].join('\n'),
           }));
         }
         /* A2 临期 */
@@ -175,7 +177,7 @@ function build(now) {
               '- 任务：' + task.title,
               '- 截止：' + dueText,
               '- 当前状态：未提交', '',
-              '[现在去提交](' + link() + ')'].join('\n'),
+              '[现在去提交](' + taskLink(task.id) + ')'].join('\n'),
           }));
         }
         /* A3 逾期 */
@@ -188,7 +190,7 @@ function build(now) {
               '- 任务：' + task.title,
               '- 原定截止：' + dueText,
               '- 当前状态：逾期未提交', '',
-              '[立即补交](' + link() + ')'].join('\n'),
+              '[立即补交](' + taskLink(task.id) + ')'].join('\n'),
           }));
           /* A4 逾期后每日催办 */
           if (task.remindOverdue !== false) {
@@ -203,7 +205,7 @@ function build(now) {
                   '- 任务：' + task.title,
                   '- 原定截止：' + dueText,
                   '- 请尽快补交并说明原因', '',
-                  '[去提交](' + link() + ')'].join('\n'),
+                  '[去提交](' + taskLink(task.id) + ')'].join('\n'),
               }));
             }
           }
@@ -223,7 +225,7 @@ function build(now) {
               '- 门店：' + store.name,
               '- 提交人：' + (rec.by || store.mgr || '—'),
               '- 时间：' + fmt(new Date(rec.doneAt)), '',
-              '[查看进度明细](' + link() + ')'].join('\n'),
+              '[查看进度明细](' + taskLink(task.id) + ')'].join('\n'),
           });
         }
       }
@@ -253,7 +255,7 @@ function build(now) {
           '- 需求：' + label,
           '- 门店：' + (d.storeName || '—'),
           '- 提交时间：' + cAt, '',
-          '[去评估](' + link() + ')'].join('\n'),
+          '[去评估](' + demandLink(d.id) + ')'].join('\n'),
       }));
       /* C2 待评估超 24 小时 */
       const hrs = Math.floor((now - new Date(d.createdAt)) / 3600000);
@@ -265,7 +267,7 @@ function build(now) {
             '- 需求：' + label,
             '- 门店：' + (d.storeName || '—'),
             '- 已等待：' + hrs + ' 小时', '',
-            '[去评估](' + link() + ')'].join('\n'),
+            '[去评估](' + demandLink(d.id) + ')'].join('\n'),
         }));
       }
     }
@@ -278,7 +280,7 @@ function build(now) {
         body: ['**需求已通过，待派发**', '',
           '- 需求：' + label,
           '- 门店：' + (d.storeName || '—'), '',
-          '[去派发](' + link() + ')'].join('\n'),
+          '[去派发](' + demandLink(d.id) + ')'].join('\n'),
       }));
     }
 
@@ -290,7 +292,7 @@ function build(now) {
         body: ['**你的需求被驳回**', '',
           '- 需求：' + label,
           '- 驳回原因：' + (d.review.comment || '—'), '',
-          '[查看并修改后重新提交](' + link() + ')'].join('\n'),
+          '[查看并修改后重新提交](' + demandLink(d.id) + ')'].join('\n'),
       }));
     }
 
@@ -304,7 +306,7 @@ function build(now) {
           '- 来源门店：' + (d.storeName || '—'),
           '- 期望完成：' + (d.assign.expectDate || '未定'),
           d.assign.note ? '- 说明：' + d.assign.note : '', '',
-          '[去处理](' + link() + ')'].join('\n').replace(/\n\n\n/g, '\n\n'),
+          '[去处理](' + demandLink(d.id) + ')'].join('\n').replace(/\n\n\n/g, '\n\n'),
       }));
       /* B8 临近期望完成日（提前 1 天 09:00） */
       if (d.assign.expectDate) {
@@ -317,7 +319,7 @@ function build(now) {
             body: ['**需求临近期望完成日**', '',
               '- 需求：' + label,
               '- 期望完成：' + fmtDate(exp) + '（还剩 1 天）', '',
-              '[去处理](' + link() + ')'].join('\n'),
+              '[去处理](' + demandLink(d.id) + ')'].join('\n'),
           }));
         }
         /* C1 超期未处理 */
@@ -331,7 +333,7 @@ function build(now) {
               '- 需求：' + label,
               '- 期望完成：' + fmtDate(exp) + '（已超 ' + over + ' 天）',
               '- 责任人：' + (d.assign.toName || '—'), '',
-              '[去跟进](' + link() + ')'].join('\n'),
+              '[去跟进](' + demandLink(d.id) + ')'].join('\n'),
           }));
         }
       }
@@ -346,7 +348,7 @@ function build(now) {
           '- 需求：' + label,
           '- 处理人：' + (d.complete.byName || '—'),
           '- 处理说明：' + (d.complete.text || '—'), '',
-          '[去确认](' + link() + ')'].join('\n'),
+          '[去确认](' + demandLink(d.id) + ')'].join('\n'),
       }));
       /* C3 待确认超 48 小时 */
       const hrs = Math.floor((now - new Date(d.complete.at)) / 3600000);
@@ -357,7 +359,7 @@ function build(now) {
           body: ['**需求完成超 48 小时未确认**', '',
             '- 需求：' + label,
             '- 已完成：' + hrs + ' 小时，仍未确认', '',
-            '[去确认](' + link() + ')'].join('\n'),
+            '[去确认](' + demandLink(d.id) + ')'].join('\n'),
         }));
       }
     }
@@ -384,7 +386,7 @@ function build(now) {
         body: ['**需求被退回重做**', '',
           '- 需求：' + label,
           '- 退回原因：' + (last.note || '—'), '',
-          '[重新处理](' + link() + ')'].join('\n'),
+          '[重新处理](' + demandLink(d.id) + ')'].join('\n'),
       }));
     }
   });

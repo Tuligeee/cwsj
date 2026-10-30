@@ -404,7 +404,7 @@ function pageHqTasks() {
 function taskAdminCard(t, refresh) {
   const p = taskProgress(t);
   const m = t.status === 'active' ? null : { label: '已停止', tag: 'tag-gray' };
-  const card = h('div', { class: 'task-card' + (p.overdue ? ' st-overdue' : p.dueSoon ? ' st-due' : '') });
+  const card = h('div', { class: 'task-card' + (p.overdue ? ' st-overdue' : p.dueSoon ? ' st-due' : ''), dataset: { taskId: t.id || '' } });
   card.appendChild(h('div', { class: 'tc-head' }, [
     h('div', { style: { flex: '1', minWidth: '0' } }, [
       h('div', { class: 'tc-title', text: t.title }),
