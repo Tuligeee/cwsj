@@ -1335,7 +1335,7 @@ function pageAdmin() {
 
   function paint() {
     clear(tabsBar);
-    [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒'], ['snap', '数据快照']].forEach(([k, l]) => {
+    [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒']].forEach(([k, l]) => {
       tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; paint(); } }, l));
     });
     clear(body);
