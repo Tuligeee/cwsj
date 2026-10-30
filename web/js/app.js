@@ -112,11 +112,12 @@ function renderUserChip() {
 /* ---------------- 路由 ---------------- */
 /* ---------- 深链接：钉钉消息里的 #task=<id> / #demand=<id> ---------- */
 function applyDeepLink() {
-  const m = (location.hash || '').match(/^#(task|demand)=(.+)$/);
+  const m = (location.hash || '').match(/^#(task|demand)=([^&]+)(?:&(fill=1))?/);
   if (!m) return;
   if (!me) { setTimeout(applyDeepLink, 500); return; }   /* 还没登录/还没拉到数据，稍后再试 */
   const kind = m[1];
   const id = decodeURIComponent(m[2]);
+  const wantFill = m[3] === 'fill=1';
   const storeSide = isStore();
   try {
     go(kind === 'task' ? (storeSide ? 'tasks' : 'hq-tasks') : (storeSide ? 'demands' : 'hq-demands'));
@@ -132,10 +133,14 @@ function applyDeepLink() {
       setTimeout(() => el.classList.remove('deep-hit'), 5000);
       /* 直接从消息点进来 → 打开详情弹窗（点卡片自带的按钮，各角色行为一致） */
       try {
-        const btn = Array.prototype.slice.call(el.querySelectorAll('button'))
-          .find(b => /详情|进度明细|查看/.test(b.textContent));
-        if (btn) btn.click();
-        else el.click();
+        const btns = Array.prototype.slice.call(el.querySelectorAll('button'));
+        const click = (re) => { const b = btns.find(x => re.test(x.textContent)); if (b) { b.click(); return true; } return false; };
+        if (wantFill) {
+          /* 消息里带 &fill=1 → 直接打开填写框（未完成=提交完成，已提交=修改提交） */
+          if (!click(/提交完成|修改提交|去提交/)) click(/详情|进度明细|查看/);
+        } else {
+          if (!click(/详情|进度明细|查看/)) click(/提交完成|修改提交/);
+        }
       } catch (e) {}
       return;
     }

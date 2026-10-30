@@ -398,13 +398,22 @@ app.post('/api/notify/flush', requireAuth, async (req, res) => {
 });
 
 /* 定时扫描：默认关闭（enabled=0），开启后每分钟跑一次 */
-setInterval(() => {
+let _ticking = false;
+setInterval(async () => {
+  if (_ticking) return;
+  _ticking = true;
   try {
-    const cfg2 = notify.cfg();
-    if (!cfg2.enabled) return;
+    /* 1) 扫描：生成站内消息（始终） + 钉钉待发队列（dry=false 时） */
     notify.scan({});
+    /* 2) 发送：只有开启且非预演才真发，避免定时器空转 */
+    const cfg2 = notify.cfg();
+    if (cfg2.enabled && !cfg2.dry) {
+      const r = await notify.flush();
+      if (r && (r.sent || r.failed)) console.log('notify.flush', JSON.stringify(r));
+    }
   } catch (e) { console.error('notify.tick', e.message); }
-}, 60000);
+  finally { _ticking = false; }
+}, 120000);
 
 /* ---------------- 任务资源接口（测试环境拆表第一步） ---------------- */
 require('./tasks_api').register(app, requireAuth, log);
@@ -412,6 +421,7 @@ require('./demands_api').register(app, requireAuth, log);
 require('./contacts_api').register(app, requireAuth, log);
 require('./snapshots').register(app, requireAuth, log);
 require('./changelog').register(app, requireAuth, log);
+require('./inbox').register(app, requireAuth);
 
 /* ---------------- 操作日志（仅管理员） ---------------- */
 app.get('/api/audit', requireAuth, (req, res) => {

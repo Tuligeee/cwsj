@@ -19,6 +19,7 @@ const LINK_BASE = process.env.CWSJ_LINK || 'http://47.114.33.192/cwsj/';
 const QUIET_FROM = 22;   // 22:00
 const QUIET_TO = 8;      // 08:00
 const MAX_PER_DAY = Number(process.env.NOTIFY_MAX_PER_DAY || 10);
+const BRAND_PREFIX = '【纯玩世界 · 门店任务管理】';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS notify_log (
@@ -46,10 +47,12 @@ function cfg() {
     const r = db.prepare('SELECT v FROM notify_cfg WHERE k = ?').get(k);
     return r ? r.v : d;
   };
+  const wl = String(get('whitelist', '') || '').split(',').map(s => s.trim()).filter(Boolean);
   return {
-    enabled: get('enabled', '0') === '1',
-    dry: get('dry', '1') === '1',
+    enabled: get('enabled', '1') === '1',
+    dry: get('dry', '0') === '1',
     maxPerDay: Number(get('max_per_day', String(MAX_PER_DAY))),
+    whitelist: wl,
   };
 }
 function setCfg(patch) {
@@ -391,6 +394,18 @@ function build(now) {
     }
   });
 
+  /* 统一格式：【品牌】+ 一句话标题（同一行）→ 空行 → 分点 → 链接
+     用户 2026-10-30 定的开头样式 */
+  out.forEach(item => {
+    if (!item.body) return;
+    const lines = item.body.split('\n');
+    const i = lines.findIndex(l => l.trim());
+    if (i < 0) return;
+    const first = lines[i].replace(/\*\*/g, '').trim();
+    lines.splice(i, 1);
+    while (lines.length && !lines[0].trim()) lines.shift();
+    item.body = BRAND_PREFIX + first + '\n\n' + lines.join('\n').trim();
+  });
   return out;
 }
 
@@ -408,6 +423,12 @@ function scan(opts) {
   const newRows = [];
   const tx = db.transaction(() => {
     cands.forEach(n => {
+      /* 站内消息需要一个可跳转的深链接：任务类带 fill=1（门店点击直接填写） */
+      if (!n.hash) {
+        n.hash = n.scenario && n.scenario[0] === 'A'
+          ? '#task=' + encodeURIComponent(n.entityId) + (['A1', 'A2', 'A3', 'A4'].indexOf(n.scenario) >= 0 ? '&fill=1' : '')
+          : '#demand=' + encodeURIComponent(n.entityId);
+      }
       let status = dry ? 'dry' : 'pending';
       let reason = dry ? '预演模式，未发送' : '';
       if (quiet) { status = dry ? 'dry' : 'deferred'; reason = '免打扰时段（22:00–08:00）'; }
@@ -418,6 +439,8 @@ function scan(opts) {
     });
   });
   tx();
+  /* 站内收件箱：与钉钉共用同一批候选，但独立存储（不受 dry 影响） */
+  try { require('./inbox').ingest(newRows); } catch (e) { console.error('inbox.ingest', e.message); }
   return { total: cands.length, queued: newRows.length, dry, quiet, rows: newRows };
 }
 
@@ -427,7 +450,14 @@ async function flush() {
   if (c.dry) return { ok: false, msg: '当前是预演模式' };
   const rows = db.prepare("SELECT * FROM notify_log WHERE status IN ('pending','deferred') LIMIT 50").all();
   let sent = 0, failed = 0;
+  const wl = c.whitelist || [];
   for (const r of rows) {
+    /* 测试白名单：名单外的人不发钉钉（站内消息照常） */
+    if (wl.length && wl.indexOf(r.person_id) < 0) {
+      db.prepare("UPDATE notify_log SET status='skipped', reason='测试白名单外' WHERE event_key=? AND person_id=?").run(r.event_key, r.person_id);
+      failed++;
+      continue;
+    }
     const mp = db.prepare('SELECT ding_userid FROM ding_map WHERE user_id = ?').get(r.person_id);
     const h = (S.getState().state.hq || []).find(x => x.id === r.person_id);
     const dingId = (h && h.dingUserId) || (mp && mp.ding_userid);
