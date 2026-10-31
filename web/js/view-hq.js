@@ -1335,7 +1335,7 @@ function pageAdmin() {
 
   function paint() {
     clear(tabsBar);
-    [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒']].forEach(([k, l]) => {
+    [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒'], ['nlog', '提醒记录']].forEach(([k, l]) => {
       tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; paint(); } }, l));
     });
     clear(body);
@@ -1343,7 +1343,141 @@ function pageAdmin() {
     else if (tab === 'account') paintAccountTab();
     else if (tab === 'audit') paintAuditTab();
     else if (tab === 'ding') paintDingTab();
+    else if (tab === 'nlog') paintNotifyLogTab();
     else paintSnapTab();
+  }
+
+
+  /* 后端存的是 UTC ISO，这里转成本地时间显示（+8） */
+  function fmtLocal(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso).slice(0, 19);
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+           p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  /* ---------- 提醒记录（只读，管理员 + 管委会） ---------- */
+  function paintNotifyLogTab() {
+    const ST_LABEL = { sent: '已发送', skipped: '被拦截', dry: '预演', pending: '待发', deferred: '免打扰' };
+    const ST_COLOR = { sent: 'var(--ok)', skipped: 'var(--danger)', dry: 'var(--text-3)', pending: 'var(--warn)', deferred: 'var(--warn)' };
+    const SCEN = { A1:'新任务',A2:'临期',A3:'逾期',A4:'催办',A5:'门店已提交',
+                   B1:'待评估',B2:'待派发',B3:'已驳回',B4:'派单',B5:'待确认',B6:'已确认',B7:'退回',B8:'临近完成',
+                   C1:'超期',C2:'评估堆积',C3:'确认堆积',TEST:'测试',VERIFY:'验证' };
+    const state = { days: 7, status: 'all', scenario: '', person: '', q: '', more: false };
+
+    const head = h('div', { class: 'row', style: { gap: '8px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' } });
+    const info = h('span', { class: 'fhint', style: { margin: '0' }, text: '加载中' });
+    const body2 = h('div', {});
+    const moreBox = h('div', { class: 'row', style: { gap: '8px', marginBottom: '10px', flexWrap: 'wrap', display: 'none' } });
+
+    function chip(label, active, onClick) {
+      return h('div', { class: 'tab' + (active ? ' active' : ''), style: { cursor: 'pointer' }, onclick: onClick }, label);
+    }
+
+    const daysRow = h('div', { class: 'tabs', style: { flexWrap: 'wrap' } });
+    const stRow = h('div', { class: 'tabs', style: { flexWrap: 'wrap' } });
+
+    function repaintChips() {
+      clear(daysRow); clear(stRow);
+      [[1,'今天'],[7,'近 7 天'],[30,'近 30 天'],[0,'全部时间']].forEach(([d, l]) =>
+        daysRow.appendChild(chip(l, state.days === d, () => { state.days = d; repaintChips(); load(); })));
+      [['all','全部状态'],['sent','已发送'],['skipped','被拦截'],['dry','预演']].forEach(([v, l]) =>
+        stRow.appendChild(chip(l, state.status === v, () => { state.status = v; repaintChips(); load(); })));
+    }
+
+    const scenSel = selectNode(Object.keys(SCEN).map(k => ({ v: k, t: SCEN[k] })), '', { placeholder: '全部场景', style: { width: '150px' } });
+    scenSel.addEventListener('change', () => { state.scenario = scenSel.value; load(); });
+    const personInp = inputNode({ placeholder: '收件人 ID（如 ST04 / HQ17）', style: { width: '210px' } });
+    const qInp = inputNode({ placeholder: '关键词（标题/内容/任务ID）', style: { width: '230px' } });
+    const searchBtn = h('button', { class: 'btn btn-sm', onclick: () => { state.person = personInp.value.trim(); state.q = qInp.value.trim(); load(); } }, '查询');
+    moreBox.appendChild(scenSel); moreBox.appendChild(personInp); moreBox.appendChild(qInp); moreBox.appendChild(searchBtn);
+
+    const moreBtn = h('button', { class: 'btn btn-sm btn-ghost', onclick: () => {
+      state.more = !state.more; moreBox.style.display = state.more ? '' : 'none';
+    } }, '更多筛选');
+    const exportBtn = h('button', { class: 'btn btn-sm btn-ghost', onclick: () => {
+      const p = new URLSearchParams({ days: String(state.days), status: state.status, scenario: state.scenario, person: state.person, q: state.q });
+      window.open(((window.Api && window.Api.base) || '') + '/api/notify/export?' + p.toString(), '_blank');
+    } }, '导出 CSV');
+
+    head.appendChild(daysRow); head.appendChild(stRow); head.appendChild(moreBtn); head.appendChild(exportBtn);
+    head.appendChild(h('span', { style: { flex: '1' } })); head.appendChild(info);
+    body.appendChild(head);
+    body.appendChild(moreBox);
+    body.appendChild(body2);
+    repaintChips();
+
+    function load() {
+      info.textContent = '加载中';
+      const p = new URLSearchParams({ limit: '200', status: state.status });
+      if (state.days) p.set('days', String(state.days));
+      if (state.scenario) p.set('scenario', state.scenario);
+      if (state.person) p.set('person', state.person);
+      if (state.q) p.set('q', state.q);
+      fetch(((window.Api && window.Api.base) || '') + '/api/notify/log?' + p.toString(), { headers: DING_AUTH() })
+        .then(r => r.json())
+        .then(r => {
+          clear(body2);
+          if (!r.ok) { info.textContent = r.msg || '读取失败'; return; }
+          info.textContent = '共 ' + r.total + ' 条' + (r.rows.length < r.total ? '（显示最近 ' + r.rows.length + ' 条）' : '');
+          if (!r.rows.length) { body2.appendChild(h('div', { class: 'fhint', style: { padding: '30px 0', textAlign: 'center' }, text: '没有符合条件的记录' })); return; }
+          /* 手机端：表格换成卡片，避免「标题」被挤成一行一个字 */
+          const mobile = window.matchMedia('(max-width: 900px)').matches;
+          if (mobile) {
+            const list = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } });
+            r.rows.forEach(row => {
+              const who = getStore(row.person_id) || getHq(row.person_id);
+              list.appendChild(h('div', {
+                style: { border: '1px solid var(--line)', borderRadius: '10px', padding: '10px 12px', background: 'var(--panel)' }
+              }, [
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' } }, [
+                  h('span', { style: { fontSize: '11.5px', color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }, text: fmtLocal(row.sent_at || row.created_at) }),
+                  tagNode(SCEN[row.scenario] || row.scenario, 'tag-gray'),
+                  h('span', { style: { flex: '1' } }),
+                  h('span', { style: { fontSize: '12px', fontWeight: '700', color: ST_COLOR[row.status] || 'var(--text-2)' }, text: ST_LABEL[row.status] || row.status }),
+                ]),
+                h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '3px' } }, [
+                  h('b', { style: { fontSize: '13.5px' }, text: who ? who.name : row.person_id }),
+                  h('span', { style: { fontSize: '11px', color: 'var(--text-3)' }, text: row.person_id }),
+                ]),
+                row.title ? h('div', { style: { fontSize: '13px', color: 'var(--text)', lineHeight: '1.5' }, text: row.title }) : null,
+                row.reason ? h('div', { style: { fontSize: '11.5px', color: 'var(--danger)', marginTop: '3px' }, text: '原因：' + row.reason }) : null,
+              ]));
+            });
+            body2.appendChild(list);
+            return;
+          }
+          const wrap = h('div', { class: 'card', style: { padding: '0', overflow: 'hidden' } });
+          const tb = h('tbody');
+          r.rows.forEach(row => {
+            const who = getStore(row.person_id) || getHq(row.person_id);
+            tb.appendChild(h('tr', {}, [
+              h('td', { style: { whiteSpace: 'nowrap', fontSize: '12px' }, text: fmtLocal(row.sent_at || row.created_at) }),
+              h('td', { style: { whiteSpace: 'nowrap' } }, [
+                h('div', { style: { fontSize: '12.5px', fontWeight: '600' }, text: who ? who.name : row.person_id }),
+                h('div', { class: 'fhint', style: { margin: '0', fontSize: '11px' }, text: row.person_id }),
+              ]),
+              h('td', { style: { whiteSpace: 'nowrap' } }, [tagNode(SCEN[row.scenario] || row.scenario, 'tag-gray')]),
+              h('td', { style: { fontSize: '12.5px' } }, [
+                h('div', { text: row.title || '—' }),
+                row.reason ? h('div', { class: 'fhint', style: { margin: '2px 0 0', fontSize: '11px' }, text: row.reason }) : null,
+              ]),
+              h('td', { style: { whiteSpace: 'nowrap' } }, [
+                h('span', { style: { fontSize: '12px', fontWeight: '600', color: ST_COLOR[row.status] || 'var(--text-2)' }, text: ST_LABEL[row.status] || row.status })
+              ]),
+            ]));
+          });
+          wrap.appendChild(h('div', { class: 'tbl-wrap' }, [h('table', { class: 'tbl' }, [
+            h('thead', {}, [h('tr', {}, ['时间', '收件人', '场景', '标题', '状态'].map(x => h('th', {}, x)))]),
+            tb
+          ])]));
+          body2.appendChild(wrap);
+        })
+        .catch(e => { info.textContent = '网络错误：' + e.message; });
+    }
+    load();
   }
 
   /* ---------- 数据快照 ---------- */

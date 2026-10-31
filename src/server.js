@@ -366,9 +366,49 @@ app.get('/api/notify/preview', requireAuth, (req, res) => {
   res.json({ ok: true, total: r.total, queued: r.queued, quiet: r.quiet, rows: r.rows, cfg: notify.cfg(), stats: notify.stats() });
 });
 
+/* 提醒记录：管理员 + 管委会可看（只读，不含重发） */
+function canSeeNotifyLog(actor) { return !!(actor && (actor.isAdmin || actor.isCommittee)); }
+
+function queryNotifyLog(q) {
+  const cond = [];
+  const args = [];
+  if (q.status && q.status !== 'all') { cond.push('status = ?'); args.push(String(q.status)); }
+  if (q.scenario) { cond.push('scenario = ?'); args.push(String(q.scenario)); }
+  if (q.person) { cond.push('person_id = ?'); args.push(String(q.person)); }
+  if (q.q) { cond.push('(title LIKE ? OR body LIKE ? OR entity_id LIKE ?)'); const k = '%' + q.q + '%'; args.push(k, k, k); }
+  if (q.days) {
+    const d = Math.max(1, Math.min(365, Number(q.days) || 7));
+    cond.push("coalesce(sent_at, created_at) >= datetime('now', ?)");
+    args.push('-' + d + ' days');
+  }
+  const where = cond.length ? (' WHERE ' + cond.join(' AND ')) : '';
+  const lim = Math.min(Math.max(Number(q.limit) || 100, 1), 1000);
+  const rows = S_prepare(`SELECT event_key, person_id, scenario, entity_id, title, status, created_at, sent_at, reason
+                          FROM notify_log${where} ORDER BY coalesce(sent_at, created_at) DESC LIMIT ?`, args.concat([lim]));
+  const total = S_prepare(`SELECT COUNT(*) c FROM notify_log${where}`, args)[0].c;
+  return { rows, total };
+}
+/* 小工具：直接借 notify 模块里的 db 句柄，避免重复 require */
+const S_db = require('./db.js').db;
+function S_prepare(sql, args) { return S_db.prepare(sql).all(...(args || [])); }
+
 app.get('/api/notify/log', requireAuth, (req, res) => {
-  if (!req.actor.isAdmin) return res.status(403).json({ ok: false, msg: '只有管理员可以查看提醒' });
-  res.json({ ok: true, rows: notify.list(Number(req.query.limit) || 50), cfg: notify.cfg(), stats: notify.stats() });
+  if (!canSeeNotifyLog(req.actor)) return res.status(403).json({ ok: false, msg: '只有管理员或管委会可以查看提醒记录' });
+  const r = queryNotifyLog(req.query || {});
+  res.json({ ok: true, rows: r.rows, total: r.total, cfg: notify.cfg(), stats: notify.stats(), me: { admin: req.actor.isAdmin, committee: req.actor.isCommittee } });
+});
+
+app.get('/api/notify/export', requireAuth, (req, res) => {
+  if (!canSeeNotifyLog(req.actor)) return res.status(403).json({ ok: false, msg: '无权限' });
+  const r = queryNotifyLog(Object.assign({}, req.query, { limit: 1000 }));
+  const head = ['时间', '收件人ID', '场景', '标题', '状态', '失败原因'];
+  const esc = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [head.map(esc).join(',')];
+  r.rows.forEach(x => lines.push([x.sent_at || x.created_at, x.person_id, x.scenario, x.title, x.status, x.reason || ''].map(esc).join(',')));
+  const csv = '\ufeff' + lines.join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="notify-log-' + new Date().toISOString().slice(0, 10) + '.csv"');
+  res.send(csv);
 });
 
 app.post('/api/notify/config', requireAuth, (req, res) => {

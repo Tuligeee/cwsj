@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS notify_cfg (
 
 /* ---------- 配置 ---------- */
 function cfg() {
+  /* 硬闸：测试环境设 NOTIFY_OFF=1，任何情况下都不发钉钉 */
+  if (process.env.NOTIFY_OFF === '1') return { enabled: false, dry: true, maxPerDay: 10, whitelist: [] };
   const get = (k, d) => {
     const r = db.prepare('SELECT v FROM notify_cfg WHERE k = ?').get(k);
     return r ? r.v : d;
@@ -219,7 +221,7 @@ function build(now) {
         const cd = creator ? hqDing(creator) : dingOf(task.creatorId);
         if (cd) {
           push({
-            key: 'A5|' + task.id + '|' + storeId + '|' + occ.key + '|' + rec.doneAt,
+            key: 'A5|' + task.id + '|' + storeId + '|' + occ.key,   /* 当天只通知一次，改提交不再重发 */
             scenario: 'A5', entityId: task.id,
             to: { id: task.creatorId, name: creator ? creator.name : '创建人', ding: cd },
             title: '门店已提交任务',
@@ -439,6 +441,8 @@ function scan(opts) {
     });
   });
   tx();
+  /* 记录保留 90 天，超期自动清理（用户 2026-10-31 定） */
+  try { db.prepare("DELETE FROM notify_log WHERE coalesce(sent_at, created_at) < datetime('now','-90 days')").run(); } catch (e) {}
   /* 站内收件箱：与钉钉共用同一批候选，但独立存储（不受 dry 影响） */
   try { require('./inbox').ingest(newRows); } catch (e) { console.error('inbox.ingest', e.message); }
   return { total: cands.length, queued: newRows.length, dry, quiet, rows: newRows };
@@ -446,11 +450,15 @@ function scan(opts) {
 
 /* 真正发送（供后续切换实发时调用） */
 async function flush() {
+  if (process.env.NOTIFY_OFF === '1') return { ok: false, msg: '该环境禁止发送钉钉' };
   const c = cfg();
   if (c.dry) return { ok: false, msg: '当前是预演模式' };
   const rows = db.prepare("SELECT * FROM notify_log WHERE status IN ('pending','deferred') LIMIT 50").all();
   let sent = 0, failed = 0;
   const wl = c.whitelist || [];
+  /* 测试环境专用：所有外发强制转给指定人（NOTIFY_FORCE_TO），
+     不管收件人本来是谁，绝不触达真实门店 */
+  const forceTo = (process.env.NOTIFY_FORCE_TO || '').trim();
   for (const r of rows) {
     /* 测试白名单：名单外的人不发钉钉（站内消息照常） */
     if (wl.length && wl.indexOf(r.person_id) < 0) {
@@ -466,7 +474,13 @@ async function flush() {
       failed++; continue;
     }
     let res;
-    try { res = await ding.sendMarkdown(dingId, r.title, r.body); }
+    let realDingId = dingId;
+    if (forceTo) {
+      const fh = (S.getState().state.hq || []).find(x => x.id === forceTo);
+      const fm = db.prepare('SELECT ding_userid FROM ding_map WHERE user_id = ?').get(forceTo);
+      realDingId = (fh && fh.dingUserId) || (fm && fm.ding_userid) || dingId;
+    }
+    try { res = await ding.sendMarkdown(realDingId, r.title, r.body); }
     catch (e) { res = { ok: false, reason: e.message }; }
     if (res.ok) {
       db.prepare("UPDATE notify_log SET status='sent', sent_at=? WHERE event_key=? AND person_id=?").run(new Date().toISOString(), r.event_key, r.person_id);
