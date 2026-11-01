@@ -143,6 +143,20 @@ function taskActiveOn(t, date) {
   if (t.stopDate && due > atTime(t.stopDate, '23:59').getTime()) return false;
   return true;
 }
+/** 下一个「有效」到期日（跳过生效日之前的周期） */
+function firstDueAfter(task, fromDate) {
+  const base = fromDate ? new Date(fromDate) : new Date();
+  const limit = 400;
+  for (let i = 0; i < limit; i++) {
+    const day = addDays(base, i);
+    const due = occDue(task, day);
+    const start = task.startDate ? atTime(task.startDate, '00:00').getTime() : 0;
+    if (due.getTime() >= start) return due;
+    if (task.cycle === 'once') return due;
+  }
+  return null;
+}
+
 /** 周期描述文案 */
 function cycleDesc(t) {
   if (t.cycle === 'daily') return '每天 ' + t.time + ' 前';
@@ -197,10 +211,15 @@ function storeBuckets(storeId, day, now) {
   state.tasks.forEach(t => {
     if (t.status !== 'active') return;
     if (!t.storeIds.includes(storeId)) return;
-    if (!taskActiveOn(t, day)) return;
-    const due = occDue(t, day);
-    const key = occKey(t, day);
-    const rec = getRecord(t.id, storeId, key);
+    const due0 = occDue(t, day);
+    const key0 = occKey(t, day);
+    const rec0 = getRecord(t.id, storeId, key0);
+    /* 本期尚未生效（到期日早于生效日）→ 不进入今日/本周/本月，只进「全部」并标「待生效」 */
+    if (!taskActiveOn(t, day)) {
+      out.future.push({ task: t, due: due0, key: key0, rec: rec0, status: 'na', notStarted: true });
+      return;
+    }
+    const due = due0, key = key0, rec = rec0;
     const st = occStatus(due, t, rec, nowD);
     const item = { task: t, due: due, key: key, rec: rec, status: st };
     if (st === 'overdue') { out.today.push(item); return; }

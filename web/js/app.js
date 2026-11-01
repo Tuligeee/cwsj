@@ -234,15 +234,18 @@ function openAuditLog() {
 
 /* ---------------- 提醒中心 ---------------- */
 function refreshBell() {
+  /* 2026-11-01：顶栏「提醒中心」铃铛已下线（消息统一走信箱入口），此处保留空实现兼容旧调用 */
+  const dot = $('#bell-dot');
+  if (!dot) return;
   const r = buildReminders();
   const n = r.urgent.length + r.soon.length;
-  const dot = $('#bell-dot');
   dot.classList.toggle('hidden', n === 0);
   dot.textContent = n > 99 ? '99+' : String(n);
 }
-function closeBell() { $('#bell-panel').classList.add('hidden'); }
+function closeBell() { const bp = $('#bell-panel'); if (bp) bp.classList.add('hidden'); }
 function toggleBell() {
   const p = $('#bell-panel');
+  if (!p) return;
   if (!p.classList.contains('hidden')) { closeBell(); return; }
   const r = buildReminders();
   clear(p);
@@ -401,7 +404,9 @@ function openChangePwdModal() {
 
 /* ---------------- 顶栏交互 ---------------- */
 function bindTopbar() {
-  $('#bell-btn').addEventListener('click', e => { e.stopPropagation(); toggleBell(); });
+  /* 顶栏铃铛已移除：仅当存在时才绑定（兼容旧缓存页面） */
+  const bellBtn = $('#bell-btn');
+  if (bellBtn) bellBtn.addEventListener('click', e => { e.stopPropagation(); toggleBell(); });
   $('#theme-btn').addEventListener('click', () => {
     const cur = document.documentElement.getAttribute('data-theme');
     applyTheme(cur === 'dark' ? 'light' : 'dark');
@@ -442,7 +447,8 @@ function bindTopbar() {
     $('#user-menu').classList.add('hidden');
     closeBell();
   });
-  $('#bell-panel').addEventListener('click', e => e.stopPropagation());
+  const bellPanel = $('#bell-panel');
+  if (bellPanel) bellPanel.addEventListener('click', e => e.stopPropagation());
   $('#user-menu').addEventListener('click', e => e.stopPropagation());
 }
 

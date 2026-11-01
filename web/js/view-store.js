@@ -18,7 +18,7 @@ const PRIORITY_TIP = { 1: '低', 2: '较低', 3: '一般', 4: '重要', 5: '非�
 function renderTaskCard(item, opts) {
   opts = opts || {};
   const t = item.task;
-  const m = STATUS_META[item.status] || STATUS_META.normal;
+  const m = item.notStarted ? { cls: '', label: '待生效', tag: 'tag-gray', cd: 'cd-normal' } : (STATUS_META[item.status] || STATUS_META.normal);
   const card = h('div', { class: 'task-card ' + m.cls, dataset: { taskId: t.id || '' } });
 
   /* 头部 */
@@ -74,10 +74,13 @@ function renderTaskCard(item, opts) {
   }
 
   /* 底部 */
+  const firstDue = item.notStarted ? firstDueAfter(t) : null;
   const cd = h('span', { class: 'countdown ' + m.cd },
-    item.rec ? ('完成于 ' + ymdhm(item.rec.doneAt)) : (ymdhm(item.due) + ' · ' + countdown(item.due)));
+    item.notStarted
+      ? ('生效 ' + (t.startDate || '—') + (firstDue ? ' · 首次到期 ' + ymdhm(firstDue) : ''))
+      : (item.rec ? ('完成于 ' + ymdhm(item.rec.doneAt)) : (ymdhm(item.due) + ' · ' + countdown(item.due))));
   const footLeft = h('div', { class: 'row' }, [
-    h('span', { class: 'fhint', style: { margin: '0' }, text: t.cycle === 'daily' ? '今日截止：' : (t.cycle === 'once' ? '截止时间：' : '本期截止：') }),
+    h('span', { class: 'fhint', style: { margin: '0' }, text: item.notStarted ? '本期状态：' : (t.cycle === 'daily' ? '今日截止：' : (t.cycle === 'once' ? '截止时间：' : '本期截止：')) }),
     cd
   ]);
   const btns = h('div', { class: 'row' });
@@ -94,7 +97,7 @@ function renderTaskCard(item, opts) {
           }
         })
       }, '撤销'));
-    } else {
+    } else if (!item.notStarted) {
       btns.appendChild(h('button', { class: 'btn btn-sm btn-primary', onclick: () => openDoneModal(item, opts.onDone) }, '提交完成'));
     }
   }

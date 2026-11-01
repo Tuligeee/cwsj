@@ -1,92 +1,160 @@
-/* 站内平台消息：右侧悬浮按钮 + 抽屉面板（2026-10-30） */
+/* =========================================================
+   站内平台消息 · 顶栏入口 + 覆盖式面板
+   2026-11-01 重做：取消右侧悬浮球与 72px 留白，入口收进顶栏，
+   面板改为从顶栏锚定、覆盖内容（不再挤压整页布局）
+   ========================================================= */
 
-.inbox-rail{
-  position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
-  z-index: 240; display: flex; flex-direction: column; gap: 10px;
-}
-.inbox-fab{
-  position: relative; width: 48px; height: 48px; border-radius: 50%;
-  background: #fff; border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(16,24,40,.12);
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-  color: var(--text-2); transition: transform .15s, box-shadow .15s, color .15s;
-}
-.inbox-fab:hover{ transform: translateY(-2px); color: var(--brand); box-shadow: 0 10px 26px rgba(16,24,40,.18); }
-.inbox-fab svg{ width: 22px; height: 22px; }
-.inbox-badge{
-  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px;
-  border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700;
-  line-height: 18px; text-align: center; box-shadow: 0 0 0 2px #fff;
-}
-.inbox-badge.hidden{ display: none; }
+.msg-wrap { display: inline-flex; position: relative; }
 
-/* 面板 */
-.inbox-mask{
-  position: fixed; inset: 0; background: rgba(12,16,26,.35); z-index: 320;
-  opacity: 0; pointer-events: none; transition: opacity .2s;
+/* 顶栏入口：沿用 .icon-btn 尺寸，仅补角标 */
+.msg-btn { position: relative; }
+
+.msg-badge {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 9px; border: 2px solid var(--panel);
+  background: var(--danger); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-variant-numeric: tabular-nums;
 }
-.inbox-mask.show{ opacity: 1; pointer-events: auto; }
-.inbox-panel{
-  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 92vw;
-  background: var(--panel, #fff); z-index: 321; display: flex; flex-direction: column;
-  box-shadow: -8px 0 30px rgba(16,24,40,.16);
-  transform: translateX(100%); transition: transform .22s ease;
+.msg-badge.hide { display: none; }
+
+/* 面板：桌面从顶栏右侧锚定 */
+.msg-panel {
+  position: fixed; top: 74px; right: 20px;
+  width: 404px; max-width: calc(100vw - 32px);
+  max-height: min(70vh, 640px);
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(16, 24, 40, .18), 0 2px 6px rgba(16, 24, 40, .08);
+  z-index: 330;
+  opacity: 0; transform: translateY(-8px) scale(.985);
+  pointer-events: none;
+  transition: opacity .16s ease, transform .16s cubic-bezier(.2, .8, .2, 1);
 }
-.inbox-panel.show{ transform: translateX(0); }
-.inbox-head{
-  display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 16px;
+[data-theme="dark"] .msg-panel { box-shadow: 0 24px 60px rgba(0, 0, 0, .6), 0 2px 6px rgba(0, 0, 0, .4); }
+.msg-panel.show { opacity: 1; transform: none; pointer-events: auto; }
+
+.msg-handle { display: none; }
+
+/* 头部 */
+.msg-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 13px 14px 13px 16px;
   border-bottom: 1px solid var(--line-2);
+  flex: 0 0 auto;
 }
-.inbox-head .left{ display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.inbox-head h3{ margin: 0; font-size: 14.5px; font-weight: 700; letter-spacing: .2px; }
-.inbox-unread{
-  font-size: 11px; font-weight: 600; color: #C0322F; background: #FDECEC;
-  border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+.msg-title { margin: 0; font-size: 14.5px; font-weight: 700; letter-spacing: .1px; }
+.msg-count {
+  font-size: 11px; font-weight: 700; line-height: 1;
+  padding: 4px 8px; border-radius: 20px;
+  color: var(--danger-tx); background: var(--danger-bg);
+  font-variant-numeric: tabular-nums;
 }
-.inbox-unread.zero{ color: var(--text-3); background: var(--panel-2, #F1F3F9); }
+.msg-count.zero { color: var(--text-3); background: var(--panel-3); }
+.msg-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 
-/* 全部已读：低调文字按钮 */
-.inbox-act{
-  display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent;
-  font-size: 12px; color: var(--brand); padding: 6px 9px; border-radius: 8px; cursor: pointer;
-  transition: background .15s; white-space: nowrap;
+.msg-tbtn {
+  height: 28px; padding: 0 9px;
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--text-2); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: background .12s, color .12s;
 }
-.inbox-act svg{ width: 13px; height: 13px; }
-.inbox-act:hover{ background: rgba(79,107,237,.09); }
-.inbox-act:active{ background: rgba(79,107,237,.16); }
+.msg-tbtn:hover { background: var(--panel-3); color: var(--text); }
+.msg-tbtn:active { background: var(--panel-3); transform: translateY(.5px); }
+.msg-tbtn:disabled { opacity: .45; cursor: default; }
+.msg-tbtn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.msg-tbtn svg { width: 13px; height: 13px; }
 
-/* 关闭：圆形图标按钮 */
-.inbox-x{
-  width: 30px; height: 30px; flex: 0 0 30px; border: 0; border-radius: 50%; background: transparent;
-  display: flex; align-items: center; justify-content: center; color: var(--text-3); cursor: pointer;
-  transition: background .15s, color .15s;
+.msg-x {
+  width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--text-3); cursor: pointer; transition: background .12s, color .12s;
 }
-.inbox-x svg{ width: 15px; height: 15px; }
-.inbox-x:hover{ background: var(--panel-2, #F1F3F9); color: var(--text); }
-.inbox-list{ flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.inbox-item{
-  padding: 12px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer; position: relative;
+.msg-x:hover { background: var(--panel-3); color: var(--text); }
+.msg-x:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.msg-x svg { width: 15px; height: 15px; }
+
+/* 列表 */
+.msg-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+
+.msg-day {
+  position: sticky; top: 0; z-index: 1;
+  padding: 10px 16px 6px;
+  background: var(--panel);
+  font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  color: var(--text-3);
 }
-.inbox-item:hover{ background: rgba(79,107,237,.04); }
-.inbox-item .t{ font-size: 13px; font-weight: 650; color: var(--text); display: flex; align-items: center; gap: 6px; }
-.inbox-item .dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: 0 0 auto; }
-.inbox-item.read .t{ font-weight: 500; color: var(--text-2); }
-.inbox-item.read .dot{ display: none; }
-.inbox-item .b{
-  font-size: 12px; color: var(--text-3); margin-top: 4px; line-height: 1.55;
+
+.msg-item {
+  display: grid; grid-template-columns: 14px 1fr; gap: 8px;
+  padding: 11px 16px 12px;
+  border-top: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: background .12s;
+}
+.msg-day + .msg-item { border-top: 0; }
+.msg-item:hover { background: var(--panel-2); }
+.msg-item:active { background: var(--panel-3); }
+.msg-item:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.msg-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; background: var(--brand); }
+.msg-item.read .msg-dot { background: transparent; }
+
+.msg-t { font-size: 13.4px; font-weight: 650; color: var(--text); line-height: 1.45; }
+.msg-item.read .msg-t { font-weight: 500; color: var(--text-2); }
+
+.msg-b {
+  margin-top: 3px;
+  font-size: 12.4px; line-height: 1.5; color: var(--text-2);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.inbox-item .m{ font-size: 11px; color: var(--text-3); margin-top: 5px; display: flex; gap: 8px; align-items: center; }
-.inbox-tag{ padding: 1px 6px; border-radius: 5px; background: var(--panel-2, #F1F3F9); color: var(--text-2); font-size: 11px; }
-.inbox-empty{ padding: 60px 16px; text-align: center; color: var(--text-3); font-size: 13px; }
 
-/* 手机端：底部抽屉样式 + 悬浮按钮挪到右下 */
-@media (max-width: 900px){
-  .inbox-rail{ right: 12px; top: auto; bottom: 92px; transform: none; }
-  .inbox-fab{ width: 46px; height: 46px; }
-  .inbox-panel{
-    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-width: none;
-    height: 72vh; border-radius: 16px 16px 0 0; transform: translateY(100%);
+.msg-m { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-3); }
+.msg-tag {
+  padding: 1px 6px; border-radius: 5px;
+  background: var(--panel-3); color: var(--text-2);
+  font-size: 10.5px; font-weight: 600;
+}
+
+/* 空态 */
+.msg-empty { padding: 54px 24px 58px; text-align: center; color: var(--text-3); font-size: 13px; }
+.msg-empty svg { width: 26px; height: 26px; opacity: .45; margin-bottom: 10px; }
+.msg-empty .p { margin: 0; }
+.msg-empty .s { margin: 5px 0 0; font-size: 12px; color: var(--text-3); opacity: .8; }
+
+/* 遮罩：桌面透明（只用来点外面关闭），手机带底色 */
+.msg-mask {
+  position: fixed; inset: 0; z-index: 329;
+  background: transparent; opacity: 0; pointer-events: none;
+  transition: opacity .16s ease;
+}
+.msg-mask.show { opacity: 1; pointer-events: auto; }
+
+/* 手机：底部抽屉 */
+@media (max-width: 900px) {
+  .msg-panel {
+    top: auto; left: 0; right: 0; bottom: 0;
+    width: auto; max-width: none; max-height: 82vh;
+    border-radius: 18px 18px 0 0;
+    border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    transform: translateY(14px);
+    box-shadow: 0 -12px 40px rgba(16, 24, 40, .18);
   }
-  .inbox-panel.show{ transform: translateY(0); }
-  .inbox-head{ padding: 12px 14px; }
+  [data-theme="dark"] .msg-panel { box-shadow: 0 -12px 40px rgba(0, 0, 0, .6); }
+  .msg-panel.show { transform: none; }
+  .msg-mask { background: rgba(12, 16, 26, .38); }
+  .msg-handle {
+    display: block; width: 38px; height: 4px; border-radius: 2px;
+    background: var(--line); margin: 8px auto 0;
+  }
+  .msg-head { padding: 8px 12px 12px 16px; }
+  .msg-item { padding: 12px 16px 13px; }
+  .msg-t { font-size: 13.6px; }
 }

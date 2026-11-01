@@ -46,7 +46,11 @@ function register(app, requireAuth, log) {
     const body = req.body || {};
     const d = body.demand;
     if (!d || !d.id) return res.status(400).json({ ok: false, msg: '缺少需求 id' });
-    if (req.actor.isStore && d.storeId !== req.actor.id) {
+    /* 需求只能由门店提报，且只能提本店（2026-11-01 单测发现总部可代提） */
+    if (!req.actor.isStore) {
+      return res.status(403).json({ ok: false, msg: '需求只能由门店提报' });
+    }
+    if (d.storeId !== req.actor.id) {
       return res.status(403).json({ ok: false, msg: '门店只能提交本店的需求' });
     }
     const r = withRetry((state) => {

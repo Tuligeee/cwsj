@@ -62,36 +62,56 @@ function dropTask(state, id) {
 }
 
 function register(app, requireAuth, log) {
-  app.post('/api/tasks', requireAuth, (req, res) => {
+  /* 仅总部可维护任务；门店账号一律拒绝（2026-11-01 单测发现接口未校验角色） */
+  const hqOnly = (req, res, next) => {
+    if (!req.actor || !req.actor.isHq) return res.status(403).json({ ok: false, msg: '仅总部账号可维护任务' });
+    next();
+  };
+  /* 改/停/删：只有任务发布人、管理员或管委会可以操作 */
+  const ownerOrAdmin = (req, res, next) => {
+    const state = require('./db.js').getState().state;
+    const t = (state.tasks || []).find(x => x.id === req.params.id);
+    if (!t) return res.status(404).json({ ok: false, msg: '任务不存在' });
+    const a = req.actor || {};
+    if (t.creatorId !== a.id && !a.isAdmin && !a.isCommittee) {
+      return res.status(403).json({ ok: false, msg: '只有任务发布人或管理员可以修改该任务' });
+    }
+    next();
+  };
+  app.post('/api/tasks', requireAuth, hqOnly, (req, res) => {
     const task = (req.body || {}).task;
+    if (!task || !task.id) return res.status(400).json({ ok: false, msg: '缺少任务 id' });
+    /* 创建接口不接受覆盖已存在的任务，避免误覆盖（改任务请用 PATCH） */
+    const exists = (require('./db.js').getState().state.tasks || []).some(t => t.id === task.id);
+    if (exists) return res.status(409).json({ ok: false, msg: '任务 ID 已存在：' + task.id });
     const r = withRetry(st => upsertTask(st, task, req.actor.id));
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
     log(req.actor.id, 'task.upsert', task && task.id);
     res.json({ ok: true, version: r.version, task: r.result });
   });
 
-  app.patch('/api/tasks/:id', requireAuth, (req, res) => {
+  app.patch('/api/tasks/:id', requireAuth, hqOnly, ownerOrAdmin, (req, res) => {
     const r = withRetry(st => patchTask(st, req.params.id, (req.body || {}).patch, req.actor.id));
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
     log(req.actor.id, 'task.patch', req.params.id);
     res.json({ ok: true, version: r.version, task: r.result });
   });
 
-  app.delete('/api/tasks/:id', requireAuth, (req, res) => {
+  app.delete('/api/tasks/:id', requireAuth, hqOnly, ownerOrAdmin, (req, res) => {
     const r = withRetry(st => dropTask(st, req.params.id));
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
     log(req.actor.id, 'task.delete', req.params.id);
     res.json({ ok: true, version: r.version });
   });
 
-  app.post('/api/tasks/:id/stop', requireAuth, (req, res) => {
+  app.post('/api/tasks/:id/stop', requireAuth, hqOnly, ownerOrAdmin, (req, res) => {
     const r = withRetry(st => patchTask(st, req.params.id, { status: 'stopped', stoppedAt: new Date().toISOString() }, req.actor.id));
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
     log(req.actor.id, 'task.stop', req.params.id);
     res.json({ ok: true, version: r.version, task: r.result });
   });
 
-  app.post('/api/tasks/:id/resume', requireAuth, (req, res) => {
+  app.post('/api/tasks/:id/resume', requireAuth, hqOnly, ownerOrAdmin, (req, res) => {
     const r = withRetry(st => patchTask(st, req.params.id, { status: 'active', stoppedAt: null }, req.actor.id));
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
     log(req.actor.id, 'task.resume', req.params.id);

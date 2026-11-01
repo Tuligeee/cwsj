@@ -721,6 +721,13 @@ app.post('/api/record/submit', requireAuth, (req, res) => {
 
   const key = String(periodKey);
   const due = occDue(task, new Date());
+  /* 本期尚未生效（到期日早于生效日）→ 不允许提交，避免"刚发布就能交"的错乱 */
+  if (task.startDate) {
+    const startTs = new Date(task.startDate + 'T00:00:00').getTime();
+    if (due.getTime() < startTs) {
+      return res.status(400).json({ ok: false, msg: '该任务本期尚未生效（' + task.startDate + ' 起执行），暂不能提交' });
+    }
+  }
   const nowIso = new Date().toISOString();
   const late = new Date(nowIso).getTime() > due.getTime() + 60000;
   const payload = {

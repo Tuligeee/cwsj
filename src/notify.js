@@ -127,6 +127,64 @@ function sentToday(personId) {
   return r.c;
 }
 
+/* ---------- 夜间积压放行：单条直发，多条合并汇总 ---------- */
+const SCEN_CN = {
+  A1: '新任务', A2: '任务临期', A3: '任务已逾期', A4: '任务催办', A5: '门店已提交',
+  B1: '新需求待评估', B2: '需求待派发', B3: '需求被驳回', B4: '派给你的需求',
+  B5: '需求待你确认', B6: '门店已确认', B7: '需求被退回', B8: '需求临近完成日',
+  C1: '需求超期未处理', C2: '需求待评估超时', C3: '需求待确认超时',
+  TEST: '系统测试', VERIFY: '验证消息'
+};
+
+function releaseDeferred() {
+  const rows = db.prepare("SELECT * FROM notify_log WHERE status = 'deferred' ORDER BY created_at").all();
+  if (!rows.length) return { digests: 0, singles: 0, merged: 0 };
+  const byPerson = {};
+  rows.forEach(r => { (byPerson[r.person_id] = byPerson[r.person_id] || []).push(r); });
+  const upSingle = db.prepare("UPDATE notify_log SET status='pending', reason=NULL WHERE event_key=? AND person_id=?");
+  const upMerged = db.prepare("UPDATE notify_log SET status='merged', reason='已并入夜间汇总' WHERE event_key=? AND person_id=?");
+  const ins = db.prepare(`INSERT OR REPLACE INTO notify_log
+    (event_key, person_id, scenario, entity_id, title, body, status, created_at, sent_at, reason)
+    VALUES (?,?,?,?,?,?,?,?,NULL,?)`);
+  let digests = 0, singles = 0, mergedCnt = 0;
+  const today = new Date().toISOString().slice(0, 10);
+
+  Object.keys(byPerson).forEach(pid => {
+    const list = byPerson[pid];
+    if (list.length === 1) { upSingle.run(list[0].event_key, pid); singles++; return; }
+    /* ≥2 条：按场景归组，生成一条汇总 */
+    const groups = {};
+    list.forEach(r => { (groups[r.scenario] = groups[r.scenario] || []).push(r); });
+    const lines = [];
+    Object.keys(groups).forEach(code => {
+      const arr = groups[code];
+      /* 取正文第一条要点里的对象名（去掉「任务：/需求：」前缀），取不到就不列名字 */
+      const names = arr.map(r => {
+        const b = String(r.body || '');
+        /* 优先取「任务：/需求：」那一行；没有就取第一条要点 */
+        const pick = (/(?:^|\n)-\s*(?:任务|需求)[:：]\s*(.+)$/m.exec(b)
+                   || /(?:^|\n)-\s*(.+)$/m.exec(b) || [])[1] || '';
+        return pick.replace(/^(任务|需求|门店|收件人|当前状态)[:：]\s*/, '').trim();
+      }).filter(t => t && t !== (SCEN_CN[code] || code)).slice(0, 3);
+      const more = arr.length > names.length ? ' 等' : '';
+      const label = SCEN_CN[code] || code;
+      lines.push('- ' + label + ' ' + arr.length + ' 条' + (names.length ? ('：' + names.join('、') + more) : ''));
+    });
+    const body = [
+      BRAND_PREFIX + '昨晚有 ' + list.length + ' 条提醒',
+      '',
+      lines.join('\n'),
+      '',
+      '[' + '打开平台查看' + '](' + LINK_BASE + ')'
+    ].join('\n');
+    ins.run('DIGEST|' + pid + '|' + today, pid, 'DIGEST', '-',
+      '昨晚有 ' + list.length + ' 条提醒', body, 'pending', new Date().toISOString(), '夜间积压合并');
+    list.forEach(r => { upMerged.run(r.event_key, r.person_id); mergedCnt++; });
+    digests++;
+  });
+  return { digests, singles, merged: mergedCnt };
+}
+
 /* ---------- 生成候选 ---------- */
 function build(now) {
   const state = S.getState().state;
@@ -152,13 +210,16 @@ function build(now) {
       const rec = records.find(r => r.taskId === task.id && r.storeId === storeId && r.periodKey === occ.key);
       const staff = dingOf(storeId);
       if (!staff) return;
+      /* 本期是否已生效：到期日早于生效日 → 本期不适用，不发临期/逾期/催办 */
+      const startTs = task.startDate ? atTime(new Date(task.startDate + 'T00:00:00'), '00:00').getTime() : 0;
+      const occActive = occ.due.getTime() >= startTs;
       const base = { to: { id: storeId, name: store.mgr || store.name, ding: staff }, store: store.name, task: task.title };
 
       if (!rec) {
         /* A1 新任务下发：只对 24 小时内新建的任务发；引擎首次运行不补发历史任务 */
         const born = task.createdAt ? new Date(task.createdAt) : null;
         const isFresh = born && (now - born) < 24 * 3600000;
-        if (isFresh && !firstRunA1) {
+        if (isFresh && !firstRunA1 && occActive) {
           push(Object.assign({}, base, {
             key: 'A1|' + task.id + '|' + storeId + '|' + (task.createdAt || task.startDate),
             scenario: 'A1', entityId: task.id,
@@ -171,7 +232,7 @@ function build(now) {
           }));
         }
         /* A2 临期 */
-        if (now >= remindAt && now < occ.due) {
+        if (occActive && now >= remindAt && now < occ.due) {
           const mins = Math.round((occ.due - now) / 60000);
           const left = mins >= 60 ? Math.round(mins / 60) + ' 小时' : mins + ' 分钟';
           push(Object.assign({}, base, {
@@ -186,7 +247,7 @@ function build(now) {
           }));
         }
         /* A3 逾期 */
-        if (now > new Date(occ.due.getTime() + 60000)) {
+        if (occActive && now > new Date(occ.due.getTime() + 60000)) {
           push(Object.assign({}, base, {
             key: 'A3|' + task.id + '|' + storeId + '|' + occ.key,
             scenario: 'A3', entityId: task.id,
@@ -418,6 +479,12 @@ function scan(opts) {
   const dry = o.dry !== undefined ? o.dry : c.dry;
   const now = o.now || new Date();
   const quiet = inQuietHours(now);
+  /* 静音时段结束（08:00 之后）→ 放行积压：
+     同一人 1 条：原样补发；≥2 条：合成一条「昨晚有 N 条提醒」汇总（用户 2026-11-01 定） */
+  let digestInfo = null;
+  if (!quiet) {
+    try { digestInfo = releaseDeferred(); } catch (e) { console.error('releaseDeferred', e.message); }
+  }
   const cands = build(now);
   const ins = db.prepare(`INSERT OR IGNORE INTO notify_log
     (event_key, person_id, scenario, entity_id, title, body, status, created_at, sent_at, reason)
@@ -453,7 +520,8 @@ async function flush() {
   if (process.env.NOTIFY_OFF === '1') return { ok: false, msg: '该环境禁止发送钉钉' };
   const c = cfg();
   if (c.dry) return { ok: false, msg: '当前是预演模式' };
-  const rows = db.prepare("SELECT * FROM notify_log WHERE status IN ('pending','deferred') LIMIT 50").all();
+  /* 只发 pending；deferred 是静音时段积压的，由 scan 在 08:00 后转回 pending */
+  const rows = db.prepare("SELECT * FROM notify_log WHERE status = 'pending' LIMIT 50").all();
   let sent = 0, failed = 0;
   const wl = c.whitelist || [];
   /* 测试环境专用：所有外发强制转给指定人（NOTIFY_FORCE_TO），
@@ -503,7 +571,7 @@ function clearDry() {
 }
 function stats() {
   const one = (s) => db.prepare('SELECT COUNT(*) c FROM notify_log WHERE status = ?').get(s).c;
-  return { dry: one('dry'), pending: one('pending'), sent: one('sent'), skipped: one('skipped'), deferred: one('deferred') };
+  return { dry: one('dry'), pending: one('pending'), sent: one('sent'), skipped: one('skipped'), deferred: one('deferred'), merged: one('merged') };
 }
 
 module.exports = { scan, flush, list, clearDry, stats, cfg, setCfg, build };
