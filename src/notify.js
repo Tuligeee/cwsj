@@ -185,11 +185,35 @@ function releaseDeferred() {
   return { digests, singles, merged: mergedCnt };
 }
 
+/* ---------- A1 起点 与 首次有效到期日 ---------- */
+function a1SinceIso() {
+  const r = db.prepare("SELECT v FROM notify_cfg WHERE k = 'a1_since'").get();
+  if (r && r.v) return r.v;
+  const nowIso = new Date().toISOString();
+  try {
+    db.prepare("INSERT INTO notify_cfg (k, v) VALUES ('a1_since', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(nowIso);
+  } catch (e) {}
+  return nowIso;
+}
+function firstDueAfter(task, from) {
+  const base = new Date(from || Date.now());
+  for (let i = 0; i < 400; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
+    const occ = occurrence(task, d);
+    const startTs = task.startDate ? new Date(task.startDate + 'T00:00:00').getTime() : 0;
+    if (occ.due.getTime() >= startTs) return occ.due;
+    if (task.cycle === 'once') return occ.due;
+  }
+  return null;
+}
+
 /* ---------- 生成候选 ---------- */
 function build(now) {
   const state = S.getState().state;
   /* 首次运行（从未发过新任务通知）时不补发历史任务，避免上线瞬间刷屏 */
-  const firstRunA1 = !db.prepare("SELECT 1 FROM notify_log WHERE scenario='A1' LIMIT 1").get();
+  const a1Since = a1SinceIso();
+  /* 原实现用「日志里有没有 A1」当闸门；A1 只有发出去才写日志 → 永远为真 → A1 永不发送。
+     现改为持久化时间点 a1_since：只对之后新建的任务发新任务通知。 */
   const out = [];
   const push = (o) => out.push(o);
   const link = () => LINK_BASE;
@@ -218,15 +242,17 @@ function build(now) {
       if (!rec) {
         /* A1 新任务下发：只对 24 小时内新建的任务发；引擎首次运行不补发历史任务 */
         const born = task.createdAt ? new Date(task.createdAt) : null;
-        const isFresh = born && (now - born) < 24 * 3600000;
-        if (isFresh && !firstRunA1 && occActive) {
+        const isFresh = born && (now - born) < 24 * 3600000 && born.getTime() >= new Date(a1Since).getTime();
+        if (isFresh) {
+          const firstDue = occActive ? occ.due : firstDueAfter(task, now);
           push(Object.assign({}, base, {
             key: 'A1|' + task.id + '|' + storeId + '|' + (task.createdAt || task.startDate),
             scenario: 'A1', entityId: task.id,
             title: '新任务已下发',
             body: ['**新任务已下发**', '',
               '- 任务：' + task.title,
-              '- 截止：' + dueText,
+              occActive ? ('- 截止：' + dueText)
+                        : ('- 首次到期：' + fmt(firstDue) + '（' + (task.startDate || '') + ' 起执行）'),
               '- 门店：' + store.name, '',
               '[立即查看并提交](' + taskLink(task.id) + ')'].join('\n'),
           }));
