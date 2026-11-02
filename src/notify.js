@@ -552,7 +552,14 @@ async function flush() {
   const wl = c.whitelist || [];
   /* 测试环境专用：所有外发强制转给指定人（NOTIFY_FORCE_TO），
      不管收件人本来是谁，绝不触达真实门店 */
-  const forceTo = (process.env.NOTIFY_FORCE_TO || '').trim();
+  /* 测试环境强制转发：环境变量优先，没有就读数据库配置（这样命令行脚本也逃不掉）；
+     处于测试模式又找不到转发目标时，直接拒发，绝不落到真实店长 */
+  const cfgGet = (k) => { const r = db.prepare('SELECT v FROM notify_cfg WHERE k = ?').get(k); return r ? String(r.v || '').trim() : ''; };
+  const forceTo = (process.env.NOTIFY_FORCE_TO || '').trim() || cfgGet('force_to');
+  const testMode = process.env.NOTIFY_TEST_MODE === '1' || cfgGet('test_mode') === '1';
+  if (testMode && !forceTo) {
+    return { ok: false, sent: 0, failed: 0, msg: '测试环境未配置转发目标，已拒绝发送（防止误发门店）' };
+  }
   for (const r of rows) {
     /* 测试白名单：名单外的人不发钉钉（站内消息照常） */
     if (wl.length && wl.indexOf(r.person_id) < 0) {
@@ -574,7 +581,10 @@ async function flush() {
       const fm = db.prepare('SELECT ding_userid FROM ding_map WHERE user_id = ?').get(forceTo);
       realDingId = (fh && fh.dingUserId) || (fm && fm.ding_userid) || dingId;
     }
-    try { res = await ding.sendMarkdown(realDingId, r.title, r.body); }
+    try {
+      res = await ding.sendMarkdown(realDingId, r.title, r.body);
+      if (forceTo && realDingId !== dingId) { try { db.prepare("UPDATE notify_log SET reason='测试转发→' || ? WHERE event_key=? AND person_id=?").run(forceTo, r.event_key, r.person_id); } catch (e) {} }
+    }
     catch (e) { res = { ok: false, reason: e.message }; }
     if (res.ok) {
       db.prepare("UPDATE notify_log SET status='sent', sent_at=? WHERE event_key=? AND person_id=?").run(new Date().toISOString(), r.event_key, r.person_id);
