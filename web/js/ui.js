@@ -198,7 +198,7 @@ function selectNode(options, value, attrs) {
 
 /** 多选筛选 chip 组：options=[{v,t,n}]，selected=Set（空集 = 全部），点击切换选中 */
 function chipMulti(options, selected, onChange) {
-  const wrap = h('div', { class: 'tabs', style: { flexWrap: 'wrap' } });
+  const wrap = h('div', { class: 'tabs chip-tabs', style: { flexWrap: 'wrap' } });
   options.forEach(o => {
     wrap.appendChild(h('div', {
       /* 注意：选中态必须在点击时实时读取 selected，不能渲染时固化，否则取消选中会失效 */

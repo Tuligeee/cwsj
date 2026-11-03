@@ -243,7 +243,14 @@ function build(now) {
         /* A1 新任务下发：只对 24 小时内新建的任务发；引擎首次运行不补发历史任务 */
         const born = task.createdAt ? new Date(task.createdAt) : null;
         const isFresh = born && (now - born) < 24 * 3600000 && born.getTime() >= new Date(a1Since).getTime();
-        if (isFresh) {
+        /* 「开始显示时间」未到 → 暂不发新任务通知，避免收到通知却看不到任务 */
+        const notYetShown = (function () {
+          if (task.cycle !== 'daily' || !task.showFrom) return false;
+          const p = String(task.showFrom).split(':');
+          const from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Number(p[0]) || 0, Number(p[1]) || 0, 0, 0);
+          return now.getTime() < from.getTime();
+        })();
+        if (isFresh && !notYetShown) {
           const firstDue = occActive ? occ.due : firstDueAfter(task, now);
           push(Object.assign({}, base, {
             key: 'A1|' + task.id + '|' + storeId + '|' + (task.createdAt || task.startDate),

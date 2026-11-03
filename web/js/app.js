@@ -94,7 +94,7 @@ function renderSideFoot() {
   clear(f);
   f.appendChild(h('div', {}, [
     h('div', {}, '当前身份'),
-    h('div', { style: { color: 'var(--text-2)', fontWeight: '600', marginTop: '2px' } },
+    h('div', { style: { color: 'var(--text-2)', fontWeight:'700', marginTop: '2px' } },
       isStore() ? (me.name + ' · 店长 ' + me.mgr) : (me.name + ' · ' + me.dept + ' ' + me.title))
   ]));
 }

@@ -143,6 +143,24 @@ function taskActiveOn(t, date) {
   if (t.stopDate && due > atTime(t.stopDate, '23:59').getTime()) return false;
   return true;
 }
+/** 「开始显示时间」：仅每日任务有效。未到点返回 true（表示此刻不该铺开） */
+function notShownYet(task, now) {
+  if (!task || task.cycle !== 'daily') return false;
+  if (!task.showFrom) return false;
+  const d = now ? new Date(now) : new Date();
+  const parts = String(task.showFrom).split(':');
+  const h = Number(parts[0]) || 0, m = Number(parts[1]) || 0;
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, 0, 0);
+  return d.getTime() < from.getTime();
+}
+/** 显示开始时刻（用于文案）。没有则返回 null */
+function shownFromTime(task, now) {
+  if (!task || task.cycle !== 'daily' || !task.showFrom) return null;
+  const d = now ? new Date(now) : new Date();
+  const parts = String(task.showFrom).split(':');
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Number(parts[0]) || 0, Number(parts[1]) || 0, 0, 0);
+}
+
 /** 下一个「有效」到期日（跳过生效日之前的周期） */
 function firstDueAfter(task, fromDate) {
   const base = fromDate ? new Date(fromDate) : new Date();
@@ -222,6 +240,12 @@ function storeBuckets(storeId, day, now) {
     const due = due0, key = key0, rec = rec0;
     const st = occStatus(due, t, rec, nowD);
     const item = { task: t, due: due, key: key, rec: rec, status: st };
+    /* 还没到「开始显示时间」→ 不铺进今日/本周/本月，只进「全部」并标 later */
+    if (notShownYet(t, nowD) && !rec) {
+      item.later = true;
+      out.future.push(item);
+      return;
+    }
     if (st === 'overdue') { out.today.push(item); return; }
     const dt = due.getTime();
     if (dt >= ds && dt <= de) out.today.push(item);

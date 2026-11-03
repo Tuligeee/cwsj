@@ -27,7 +27,7 @@ function pageHqDemands() {
   /* 状态/分类多选（空 = 全部需求）；默认选中「待我评估」/「我负责处理」 */
   const tabSet = new Set([isCommittee() ? 'review' : 'mine']);
   const statBox = h('div');
-  const tabsBar = h('div', { class: 'tabs' });
+  const tabsBar = h('div', { class: 'tabs chip-tabs' });
   const listBox = h('div');
 
   function pool() { return visibleDemands(); }
@@ -286,13 +286,15 @@ function pageHqTasks() {
   /* 任务来源多选：我发布的 / 其他部门发布的（两个都选 = 全公司） */
   const scopeSet = new Set(isCommittee() ? ['mine', 'others'] : ['mine']);
   const tabSet = new Set(['active']);   // 任务状态多选（空 = 全部）
-  const deptSet = new Set();             // 发布部门多选（手机端才有，空 = 全部）
+  const deptSet = new Set();             // 发布部门多选（空 = 全部）
+  const cycleSet = new Set();            // 任务类型多选（每日/每周/每月/专项，空 = 全部）
   const statBox = h('div');
-  const scopeBar = h('div', { style: { marginBottom: '10px' } });
-  const tabsBar = h('div', { class: 'tabs' });
+  const scopeBar = h('div', { class: 'm2-toolrow', style: { marginLeft: 'auto' } });
+  const tabsBar = h('div', { class: 'tabs chip-tabs' });
+  const cycleBar = h('div', { class: 'tabs chip-tabs' });
   const listBox = h('div');
   /* 筛选行标签（与任务来源行同宽，保证两行选项左对齐） */
-  const statusLabel = h('div', { class: 'frow' }, [h('span', { class: 'flabel', text: '任务状态（可多选）：' })]);
+  const statusLabel = h('span', { class: 'flt-k', text: '任务状态' });
   /* 手机端的部门筛选：与其他页一致，渲染成 .tabs 交给 m2-ui 收进弹窗 */
   const deptBar = h('div');
 
@@ -310,6 +312,7 @@ function pageHqTasks() {
   function base() {
     let l = sourceItems();
     if (deptSet.size) l = l.filter(t => deptSet.has(t.dept));
+    if (cycleSet.size) l = l.filter(t => cycleSet.has(t.cycle));
     if (tabSet.size) l = l.filter(t => (t.status === 'active' ? tabSet.has('active') : tabSet.has('stopped')));
     return l.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
@@ -344,6 +347,20 @@ function pageHqTasks() {
       overdueTotal += p.overdue; dueTotal += p.dueSoon; doneTotal += p.done; expTotal += p.expected;
     });
     const actN = src.filter(t => t.status === 'active').length;
+
+    /* 任务类型：每日/每周/每月/专项（可多选，空 = 全部） */
+    clear(cycleBar);
+    {
+      const scoped = deptSet.size ? src.filter(t => deptSet.has(t.dept)) : src;
+      [['daily', '每日必做'], ['weekly', '每周必做'], ['monthly', '每月必做'], ['once', '专项任务']].forEach(([k, l]) => {
+        const on = cycleSet.has(k);
+        const n = scoped.filter(t => t.cycle === k).length;
+        cycleBar.appendChild(h('div', {
+          class: 'tab' + (on ? ' active' : ''),
+          onclick: () => { on ? cycleSet.delete(k) : cycleSet.add(k); paint(); }
+        }, [h('span', { text: l }), h('span', { class: 'cnt' }, String(n))]));
+      });
+    }
 
     clear(tabsBar);
     tabsBar.appendChild(h('div', {
@@ -386,17 +403,25 @@ function pageHqTasks() {
     /* 需求：chipMulti 的选中态在点击时不改 class，所以这里必须重建整条，选中态才看得见 */
     const paintDeptBar = () => {
       clear(deptBar);
-      deptBar.appendChild(h('div', { class: 'frow' }, [h('span', { class: 'flabel', text: '发布部门（可多选）：' })]));
+      deptBar.classList.add('flt-row', 'flt-row-actions');
       const uniq = Array.from(new Set(state.tasks.map(t => t.dept).filter(Boolean)));
+      deptBar.appendChild(h('span', { class: 'flt-k', text: '发布部门' }));
       if (uniq.length) {
-        deptBar.appendChild(chipMulti(uniq.map(d => ({ v: d, t: d })), deptSet, () => { paintDeptBar(); paintAll(); }));
+        /* 带上各部门任务数，让这一行与「任务类型 / 任务状态」视觉等重 */
+        const cnt = {};
+        state.tasks.forEach(t => { if (t.dept) cnt[t.dept] = (cnt[t.dept] || 0) + 1; });
+        deptBar.appendChild(chipMulti(uniq.map(d => ({ v: d, t: d, n: cnt[d] || 0 })), deptSet, () => { paintDeptBar(); paintAll(); }));
       }
     };
     paintDeptBar();
-    topRow.appendChild(deptBar);
-    topRow.appendChild(scopeBar);
+    const panel = h('div', { class: 'flt' });
+    panel.appendChild(deptBar);
+    deptBar.appendChild(scopeBar);
+    panel.appendChild(h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: '任务类型' }), cycleBar]));
+    panel.appendChild(h('div', { class: 'flt-row' }, [statusLabel, tabsBar]));
+    wrap.appendChild(panel);
   }
-  wrap.appendChild(statusLabel); wrap.appendChild(tabsBar); wrap.appendChild(statBox); wrap.appendChild(listBox);
+  wrap.appendChild(statBox); wrap.appendChild(listBox);
   return wrap;
 }
 
@@ -428,12 +453,18 @@ function taskAdminCard(t, refresh) {
   ]));
   if (t.content) card.appendChild(h('div', { class: 'tc-body', text: t.content }));
 
+  /* 任务附件：图片 + 链接（与门店端卡片同一套组件，2026-11-03） */
+  const tImg = (typeof thumbsNode === 'function') ? thumbsNode(t.images) : null;
+  if (tImg) card.appendChild(tImg);
+  const tLink = (typeof linksNode === 'function') ? linksNode(t.links) : null;
+  if (tLink) card.appendChild(tLink);
+
   /* 进度 */
   const rateCls = p.rate >= 90 ? 'ok' : p.rate >= 60 ? '' : 'danger';
   card.appendChild(h('div', { class: 'mt10' }, [
     h('div', { class: 'row', style: { justifyContent: 'space-between', marginBottom: '5px' } }, [
       h('span', { class: 'fhint', style: { margin: '0' }, text: '本期进度：' + p.done + ' / ' + p.expected + ' 家门店已完成（覆盖 ' + t.storeIds.length + ' 家）' }),
-      h('span', { style: { fontSize: '12.5px', fontWeight: '650' }, text: p.rate.toFixed(1) + '%' })
+      h('span', { style: { fontSize: '12.5px', fontWeight:'700' }, text: p.rate.toFixed(1) + '%' })
     ]),
     progressNode(p.rate, rateCls)
   ]));
@@ -481,6 +512,7 @@ function openTaskForm(task, onDone, opts) {
     title: inputNode({ value: d.title, placeholder: '例如：营业前设备自检与卫生清洁' }),
     content: textareaNode({ rows: '4', value: d.content, placeholder: '写清做什么、做到什么标准、需要上传什么凭证' }),
     time: inputNode({ type: 'time', value: d.time || '18:00', style: { width: '150px' } }),
+    showFrom: inputNode({ type: 'time', value: d.showFrom || '', style: { width: '150px' } }),
     weekday: selectNode(WD_CN.map((w, i) => ({ v: i + 1, t: '每周' + w })), d.weekday || 5, { style: { width: '160px' } }),
     monthDay: selectNode(Array.from({ length: 31 }, (_, i) => ({ v: i + 1, t: '每月 ' + (i + 1) + ' 日' })), d.monthDay || 25, { style: { width: '160px' } }),
     deadline: inputNode({ type: 'datetime-local', value: (d.deadline || '').slice(0, 16) }),
@@ -587,6 +619,9 @@ function openTaskForm(task, onDone, opts) {
     const rec = cycle !== 'once';
     dynBox.appendChild(h('div', { class: 'fgrid c2' }, [
       fgroup('截止时刻', ref.time, '门店需在该时刻前完成并提交', true),
+      cycle === 'daily'
+        ? fgroup('开始显示时间（可选）', ref.showFrom, '留空 = 全天显示。晚班任务填 13:00，13 点前不出现在门店「今日」，只在折叠行里提示', false)
+        : h('div', { style: { display: 'none' } }, [ref.showFrom]),
       cycle === 'weekly' ? fgroup('每周哪一天', ref.weekday, null, true)
         : cycle === 'monthly' ? fgroup('每月哪一天', ref.monthDay, '若当月不足该日，自动取当月最后一天', true)
           : cycle === 'once' ? fgroup('截止时间（日期+时间）', ref.deadline, '专项任务到点未完成即标红', true)
@@ -659,6 +694,7 @@ function openTaskForm(task, onDone, opts) {
           const payload = {
             title: title, content: content, cycle: cycle,
             time: cycle === 'once' ? (ref.deadline.value.slice(11, 16) || '18:00') : ref.time.value,
+            showFrom: (cycle === 'daily' && ref.showFrom.value) ? ref.showFrom.value : null,
             weekday: Number(ref.weekday.value), monthDay: Number(ref.monthDay.value),
             deadline: cycle === 'once' ? new Date(ref.deadline.value).toISOString() : null,
             storeIds: storeIds, priority: priority,
@@ -713,7 +749,7 @@ function openTaskForm(task, onDone, opts) {
 let _boardFilter = { dept: new Set(), cycle: new Set(), status: new Set(), onlyProblem: false };
 function pageHqBoard() {
   const wrap = h('div');
-  const filterBox = h('div', { style: { marginBottom: '14px' } });
+  const filterBox = h('div', { class: 'flt' });
   const boardBox = h('div');
 
   function tasksFiltered() {
@@ -771,7 +807,7 @@ function pageHqBoard() {
       const p = taskProgress(t);
       const tr = h('tr');
       tr.appendChild(h('td', { class: 'task-col' }, [
-        h('div', { style: { fontWeight: '650', fontSize: '12.5px', lineHeight: '1.4' } }, t.title),
+        h('div', { style: { fontWeight:'700', fontSize: '12.5px', lineHeight: '1.4' } }, t.title),
         h('div', { class: 'row', style: { marginTop: '4px' } }, [
           tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle]),
           h('span', { style: { fontSize: '11px', color: 'var(--text-3)' }, text: cycleDesc(t) + ' · ' + t.dept })
@@ -789,7 +825,7 @@ function pageHqBoard() {
         tr.appendChild(td);
       });
       tr.appendChild(h('td', { class: 'prog-col' }, [
-        h('div', { style: { fontSize: '12px', fontWeight: '650' }, text: p.done + '/' + p.expected }),
+        h('div', { style: { fontSize: '12px', fontWeight:'700' }, text: p.done + '/' + p.expected }),
         progressNode(p.rate, p.rate >= 90 ? 'ok' : p.rate >= 60 ? '' : 'danger')
       ]));
       tbody.appendChild(tr);
@@ -848,13 +884,10 @@ function pageHqBoard() {
     if (M2()) { paintFilterMobile(); return; }
     clear(filterBox);
     const mkRow = (label, opts, set) => {
-      const row = h('div', { class: 'row', style: { gap: '8px', alignItems: 'flex-start', marginBottom: '8px' } }, [
-        h('span', { class: 'fhint', style: { margin: '4px 0 0', width: '86px', flexShrink: '0' }, text: label + '（可多选）：' })
-      ]);
-      const chips = chipMulti(opts, set, () => { paintFilter(); paint(); });
-      row.appendChild(chips);
+      const row = h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: label })]);
+      row.appendChild(chipMulti(opts, set, () => { paintFilter(); paint(); }));
       if (set.size) row.appendChild(h('button', {
-        class: 'btn btn-xs', style: { marginTop: '4px' },
+        class: 'flt-act', style: { marginLeft: 'auto' },
         onclick: () => { set.clear(); paintFilter(); paint(); }
       }, '× 清除'));
       return row;
@@ -866,7 +899,9 @@ function pageHqBoard() {
     filterBox.appendChild(mkRow('任务状态', [
       { v: 'active', t: '进行中' }, { v: 'stopped', t: '已停止' }
     ], _boardFilter.status));
-    filterBox.appendChild(h('label', { class: 'switch', style: { marginLeft: '86px' } }, [problemChk, h('span', { text: '只看有逾期的任务' })]));
+    filterBox.appendChild(h('div', { class: 'flt-row' }, [
+      h('label', { class: 'switch' }, [problemChk, h('span', { text: '只看有逾期的任务' })])
+    ]));
   }
 
   /* 手机端筛选：三个按钮，点了弹出选择面板，选完就收起 */
@@ -920,9 +955,13 @@ function pageHqBoard() {
     });
   }
   paintFilter();
-  if (!M2()) filterBox.appendChild(h('div', { class: 'row', style: { marginTop: '8px' } }, [
-    h('button', { class: 'btn btn-sm', style: { marginLeft: 'auto' }, onclick: exportBoard }, '导出督办表 CSV')
-  ]));
+  if (!M2()) {
+    /* 导出按钮并入筛选面板最后一行右侧，不再单独占一条空行 */
+    const lastRow = filterBox.querySelector('.flt-row:last-of-type');
+    (lastRow || filterBox).appendChild(h('button', {
+      class: 'flt-act', style: { marginLeft: 'auto' }, onclick: exportBoard
+    }, '导出督办表 CSV'));
+  }
 
   paint();
   wrap.appendChild(filterBox); wrap.appendChild(boardBox);
@@ -1479,7 +1518,7 @@ function pageAdmin() {
             tb.appendChild(h('tr', {}, [
               h('td', { style: { whiteSpace: 'nowrap', fontSize: '12px' }, text: fmtLocal(row.sent_at || row.created_at) }),
               h('td', { style: { whiteSpace: 'nowrap' } }, [
-                h('div', { style: { fontSize: '12.5px', fontWeight: '600' }, text: who ? who.name : row.person_id }),
+                h('div', { style: { fontSize: '12.5px', fontWeight:'700' }, text: who ? who.name : row.person_id }),
                 h('div', { class: 'fhint', style: { margin: '0', fontSize: '11px' }, text: row.person_id }),
               ]),
               h('td', { style: { whiteSpace: 'nowrap' } }, [tagNode(SCEN[row.scenario] || row.scenario, 'tag-gray')]),
@@ -1488,7 +1527,7 @@ function pageAdmin() {
                 row.reason ? h('div', { class: 'fhint', style: { margin: '2px 0 0', fontSize: '11px' }, text: row.reason }) : null,
               ]),
               h('td', { style: { whiteSpace: 'nowrap' } }, [
-                h('span', { style: { fontSize: '12px', fontWeight: '600', color: ST_COLOR[row.status] || 'var(--text-2)' }, text: ST_LABEL[row.status] || row.status })
+                h('span', { style: { fontSize: '12px', fontWeight:'700', color: ST_COLOR[row.status] || 'var(--text-2)' }, text: ST_LABEL[row.status] || row.status })
               ]),
             ]));
           });
@@ -1520,7 +1559,7 @@ function pageAdmin() {
     /* 最近改动：可单条恢复 */
     const chBox = h('div', { class: 'card mt14', style: { padding: '10px 12px' } });
     const chList = h('div', {});
-    chBox.appendChild(h('div', { style: { fontSize: '13px', fontWeight: '650', marginBottom: '6px' }, text: '最近改动（可单条恢复）' }));
+    chBox.appendChild(h('div', { style: { fontSize: '13px', fontWeight:'700', marginBottom: '6px' }, text: '最近改动（可单条恢复）' }));
     chBox.appendChild(chList);
     body.appendChild(chBox);
     fetch(((window.Api && window.Api.base) || '') + '/api/changes?limit=20', { headers: DING_AUTH() }).then(r => r.json()).then(r => {
@@ -1656,7 +1695,7 @@ function pageAdmin() {
                   .then(x => { if (x.ok) { inst.close(); paint(); toast('已绑定 ' + x.dingName); } else toast(x.msg || '绑定失败', 'err'); });
               }
             }, [
-              h('div', { style: { fontSize: '13px', fontWeight: '600' }, text: p.name + (p.title ? ' · ' + p.title : '') }),
+              h('div', { style: { fontSize: '13px', fontWeight:'700' }, text: p.name + (p.title ? ' · ' + p.title : '') }),
               h('div', { class: 'fhint', style: { margin: '2px 0 0' }, text: (JSON.parse(p.depts || '[]') || []).slice(0, 3).join(' / ') })
             ]));
           });
@@ -1731,7 +1770,7 @@ function pageAdmin() {
         style: { width: '120px' }, onchange: async e => { await updateStore(s.id, { regionId: e.target.value || null }); toast('已更新分区'); paint(); }
       });
       return h('tr', { style: s.enabled === false ? { opacity: '.5' } : null }, [
-        h('td', {}, [h('div', { style: { fontWeight: '600' } }, s.name), h('div', { class: 'fhint', style: { margin: 0 } }, s.id + ' · ' + s.addr)]),
+        h('td', {}, [h('div', { style: { fontWeight:'700' } }, s.name), h('div', { class: 'fhint', style: { margin: 0 } }, s.id + ' · ' + s.addr)]),
         h('td', {}, s.account || s.code),
         h('td', {}, s.mgr),
         h('td', {}, s.city),
@@ -1889,7 +1928,7 @@ function pageAdmin() {
       !u.committee && !u.admin ? tagNode('普通', 'tag-gray') : null
     ]);
     const rows = state.hq.map(u => h('tr', { style: u.enabled === false ? { opacity: '.5' } : null }, [
-      h('td', {}, [h('div', { style: { fontWeight: '600' } }, u.name), h('div', { class: 'fhint', style: { margin: 0 } }, u.id)]),
+      h('td', {}, [h('div', { style: { fontWeight:'700' } }, u.name), h('div', { class: 'fhint', style: { margin: 0 } }, u.id)]),
       h('td', {}, u.account),
       h('td', {}, tagNode(u.dept, 'tag-line')),
       h('td', {}, u.title),

@@ -18,7 +18,9 @@ const PRIORITY_TIP = { 1: '低', 2: '较低', 3: '一般', 4: '重要', 5: '非�
 function renderTaskCard(item, opts) {
   opts = opts || {};
   const t = item.task;
-  const m = item.notStarted ? { cls: '', label: '待生效', tag: 'tag-gray', cd: 'cd-normal' } : (STATUS_META[item.status] || STATUS_META.normal);
+  const m = item.later
+    ? { cls: '', label: (String(t.showFrom || '') + ' 开始'), tag: 'tag-gray', cd: 'cd-normal' }
+    : (item.notStarted ? { cls: '', label: '待生效', tag: 'tag-gray', cd: 'cd-normal' } : (STATUS_META[item.status] || STATUS_META.normal));
   const card = h('div', { class: 'task-card ' + m.cls, dataset: { taskId: t.id || '' } });
 
   /* 头部 */
@@ -34,7 +36,7 @@ function renderTaskCard(item, opts) {
   if (opts.showStore) {
     const s = getStore(opts.storeId);
     meta.appendChild(h('span', { class: 'sep' }, '·'));
-    meta.appendChild(h('span', { style: { fontWeight: '600', color: 'var(--text-2)' } }, '受派门店：' + (s ? s.name : '—')));
+    meta.appendChild(h('span', { style: { fontWeight:'700', color: 'var(--text-2)' } }, '受派门店：' + (s ? s.name : '—')));
   }
   card.appendChild(h('div', { class: 'tc-head' }, [
     h('div', { style: { flex: '1', minWidth: '0' } }, [
@@ -76,9 +78,11 @@ function renderTaskCard(item, opts) {
   /* 底部 */
   const firstDue = item.notStarted ? firstDueAfter(t) : null;
   const cd = h('span', { class: 'countdown ' + m.cd },
-    item.notStarted
-      ? ('生效 ' + (t.startDate || '—') + (firstDue ? ' · 首次到期 ' + ymdhm(firstDue) : ''))
-      : (item.rec ? ('完成于 ' + ymdhm(item.rec.doneAt)) : (ymdhm(item.due) + ' · ' + countdown(item.due))));
+    item.later
+      ? (String(t.showFrom || '') + ' 开始显示 · 今日截止 ' + ymdhm(item.due))
+      : (item.notStarted
+        ? ('生效 ' + (t.startDate || '—') + (firstDue ? ' · 首次到期 ' + ymdhm(firstDue) : ''))
+        : (item.rec ? ('完成于 ' + ymdhm(item.rec.doneAt)) : (ymdhm(item.due) + ' · ' + countdown(item.due)))));
   const footLeft = h('div', { class: 'row' }, [
     h('span', { class: 'fhint', style: { margin: '0' }, text: item.notStarted ? '本期状态：' : (t.cycle === 'daily' ? '今日截止：' : (t.cycle === 'once' ? '截止时间：' : '本期截止：')) }),
     cd
@@ -97,7 +101,7 @@ function renderTaskCard(item, opts) {
           }
         })
       }, '撤销'));
-    } else if (!item.notStarted) {
+    } else if (!item.notStarted && !item.later) {
       btns.appendChild(h('button', { class: 'btn btn-sm btn-primary', onclick: () => openDoneModal(item, opts.onDone) }, '提交完成'));
     }
   }
@@ -172,7 +176,7 @@ function openTaskDetail(item, opts) {
       h('dt', {}, '提醒规则'), h('dd', {}, desclineText(t)),
       h('dt', {}, '受派门店'), h('dd', {}, t.storeIds.length + ' 家：' + t.storeIds.map(id => { const s = getStore(id); return s ? s.name : id; }).join('、')),
       h('dt', {}, '本期进度'), h('dd', {}, h('span', { class: 'row' }, [
-        h('span', { style: { fontWeight: '650' }, text: p.done + ' / ' + p.expected + ' 家完成' }),
+        h('span', { style: { fontWeight:'700' }, text: p.done + ' / ' + p.expected + ' 家完成' }),
         tagNode('逾期 ' + p.overdue + ' 家', p.overdue ? 'tag-red' : 'tag-gray'),
         tagNode('临期 ' + p.dueSoon + ' 家', p.dueSoon ? 'tag-yellow' : 'tag-gray')
       ]))
@@ -636,60 +640,126 @@ function pageStoreTasks() {
     return items;
   }
 
+  let laterOpen = false;   /* 晚班任务折叠区是否展开 */
   function paint() {
     /* 周期筛选：今日 / 本周 / 本月 / 全部（专项任务不受周期影响，选中时隐藏） */
+    /* ---- 控制面板：周期 / 发布人 / 状态，一张卡三行 ---- */
     clear(periodBar);
-    [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部']].forEach(([k, label]) => {
-      periodBar.appendChild(h('div', {
-        class: 'tab' + (period === k && cycleFilter !== 'once' ? ' active' : ''),
-        onclick: () => { period = k; cycleFilter = 'all'; filterSet.clear(); paint(); }
-      }, [h('span', { text: label }), h('span', { class: 'cnt' }, String(periodItems(k).length))]));
-    });
-    /* 专项任务：作为周期条最右一个选项，点了只看专项任务 */
-    periodBar.appendChild(h('div', {
-      class: 'tab' + (cycleFilter === 'once' ? ' active' : ''),
-      onclick: () => { cycleFilter = cycleFilter === 'once' ? 'all' : 'once'; filterSet.clear(); paint(); }
-    }, [h('span', { text: '专项' }), h('span', { class: 'cnt' }, String(onceItems().length))]));
-    /* 选中项若被挤到屏幕外，自动滚进视野 */
-    const activeTab = periodBar.querySelector('.tab.active');
-    if (activeTab && activeTab.scrollIntoView) activeTab.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-
-    /* 发布人多选 chips */
+    periodBar.style.display = 'none';
     clear(filterBar);
-    filterBar.appendChild(h('div', { class: 'frow' }, [
-      h('span', { class: 'flabel', text: '任务发布人（可多选）：' }),
-      creatorSet.size ? h('button', { class: 'btn btn-xs', onclick: () => { creatorSet.clear(); paint(); } }, '× 清除') : null,
-      h('button', { class: 'btn btn-xs', style: { marginLeft: 'auto' }, onclick: () => { paint(); toast('已刷新'); } }, '↻ 刷新')
-    ]));
-    const opts = creatorOptions();
-    if (opts.length) {
-      filterBar.appendChild(chipMulti(opts, creatorSet, paint));
-    } else {
-      filterBar.appendChild(h('span', { class: 'fhint', text: '暂无任务' }));
-    }
+    clear(statusLabel);
+    statusLabel.style.display = 'none';
+    clear(tabsBar);
 
+    const card = h('div', { class: 'flt' });
+
+    /* 第 1 行：周期切换 + 动作 */
+    const segWrap = h('div', { class: 'flt-seg', role: 'tablist' });
+    [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部']].forEach(([k, label]) => {
+      const on = period === k && cycleFilter !== 'once';
+      segWrap.appendChild(h('button', {
+        class: 'seg' + (on ? ' on' : ''), type: 'button', role: 'tab', 'aria-selected': on ? 'true' : 'false',
+        onclick: () => { period = k; cycleFilter = 'all'; filterSet.clear(); paint(); }
+      }, [h('span', { text: label }), h('span', { class: 'n', text: String(periodItems(k).length) })]));
+    });
+    const onceOn = cycleFilter === 'once';
+    segWrap.appendChild(h('button', {
+      class: 'seg' + (onceOn ? ' on' : ''), type: 'button', role: 'tab', 'aria-selected': onceOn ? 'true' : 'false',
+      onclick: () => { cycleFilter = onceOn ? 'all' : 'once'; filterSet.clear(); paint(); }
+    }, [h('span', { text: '专项' }), h('span', { class: 'n', text: String(onceItems().length) })]));
+
+    const anyFilter = creatorSet.size || filterSet.size;
+    const acts = h('div', { class: 'flt-acts' }, [
+      anyFilter ? h('button', {
+        class: 'flt-act', type: 'button', title: '清除全部筛选',
+        onclick: () => { creatorSet.clear(); filterSet.clear(); paint(); }
+      }, [h('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' }), h('span', { text: '清除筛选' })]) : null,
+      h('button', {
+        class: 'flt-act', type: 'button', title: '刷新',
+        onclick: () => { paint(); toast('已刷新'); }
+      }, [h('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>' }), h('span', { text: '刷新' })])
+    ]);
+    card.appendChild(h('div', { class: 'flt-row seg-row' }, [
+      h('span', { class: 'flt-k', text: '周期' }), segWrap, acts
+    ]));
+
+    /* 第 2 行：发布人 */
+    const opts = creatorOptions();
+    const cChips = h('div', { class: 'chips' });
+    if (opts.length) {
+      opts.forEach(o => {
+        const on = creatorSet.has(o.v);
+        cChips.appendChild(h('button', {
+          class: 'chip' + (on ? ' on' : ''), type: 'button',
+          onclick: () => { on ? creatorSet.delete(o.v) : creatorSet.add(o.v); paint(); }
+        }, [
+          h('span', { class: 'ck', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' }),
+          h('span', { text: o.t })
+        ]));
+      });
+    } else {
+      cChips.appendChild(h('span', { class: 'fhint', text: '暂无任务' }));
+    }
+    card.appendChild(h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: '发布人' }), cChips]));
+
+    /* 第 3 行：状态 */
     const base = baseItems();
     const doneN = base.filter(x => x.status === 'done' || x.status === 'late').length;
     const overdueN = base.filter(x => x.status === 'overdue').length;
     const dueN = base.filter(x => x.status === 'due').length;
-    clear(tabsBar);
     const defs = [
       ['unfinished', '未完成', base.length - doneN],
       ['due', '即将到期', dueN],
       ['overdue', '已逾期', overdueN],
       ['finished', '已完成', doneN]
     ];
-    tabsBar.appendChild(h('div', {
-      class: 'tab' + (filterSet.size === 0 ? ' active' : ''),
+    const chk = () => h('span', { class: 'ck', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' });
+    const sChips = h('div', { class: 'chips' });
+    const allOn = filterSet.size === 0;
+    sChips.appendChild(h('button', {
+      class: 'chip' + (allOn ? ' on' : ''), type: 'button',
       onclick: () => { filterSet.clear(); paint(); }
-    }, [h('span', { text: '全部状态' }), h('span', { class: 'cnt' }, String(base.length))]));
-    defs.forEach(([k, label, n]) => tabsBar.appendChild(h('div', {
-      class: 'tab' + (filterSet.has(k) ? ' active' : ''), onclick: () => { filterSet.has(k) ? filterSet.delete(k) : filterSet.add(k); paint(); }
-    }, [label, h('span', { class: 'cnt' }, String(n))])));
+    }, [chk(), h('span', { text: '全部状态' }), h('span', { class: 'n', text: String(base.length) })]));
+    defs.forEach(([k, label, n]) => {
+      const on = filterSet.has(k);
+      sChips.appendChild(h('button', {
+        class: 'chip' + (on ? ' on' : ''), type: 'button',
+        onclick: () => { on ? filterSet.delete(k) : filterSet.add(k); paint(); }
+      }, [chk(), h('span', { text: label }), h('span', { class: 'n', text: String(n) })]));
+    });
+    card.appendChild(h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: '状态' }), sChips]));
+
+    filterBar.appendChild(card);
 
     const items = data();
     clear(listBox);
-    if (!items.length) {
+    /* 「开始显示时间」未到的晚班任务：今日折叠成一行，可展开 */
+    const laterList = period === 'today'
+      ? storeBuckets(me.id, new Date()).future.filter(x => x.later && !x.rec)
+      : [];
+    if (laterList.length) {
+      const times = Array.from(new Set(laterList.map(x => String(x.task.showFrom || '')))).filter(Boolean).sort().join('、');
+      listBox.appendChild(h('div', {
+        class: 'later-bar' + (laterOpen ? ' open' : ''),
+        onclick: () => { laterOpen = !laterOpen; paint(); }
+      }, [
+        h('span', { class: 'lb-ico', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>' }),
+        h('span', { class: 'lb-main' }, [
+          h('b', { text: '还有 ' + laterList.length + ' 个任务稍后开始' }),
+          h('span', { class: 'lb-sub', text: times + ' 显示，到点自动出现' })
+        ]),
+        h('span', { class: 'lb-act' }, [
+          h('span', { class: 'lb-act-txt', text: laterOpen ? '收起' : '展开' }),
+          h('span', { class: 'lb-caret', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>' })
+        ])
+      ]));
+      if (laterOpen) {
+        const lw = h('div', { class: 'task-list' });
+        laterList.forEach(it => lw.appendChild(renderTaskCard(it, { mode: 'store', onDone: paint })));
+        listBox.appendChild(lw);
+      }
+    }
+    if (!items.length && !laterList.length) {
       listBox.appendChild(emptyNode(
         creatorSet.size ? '所选发布人在本期没有符合条件的任务'
           : (filterSet.size === 0 ? '本期没有任务，先休息一下吧' : '当前筛选下没有任务'), '✅'));
@@ -982,7 +1052,7 @@ function pageStoreStats() {
 
     const tbl = h('table', { class: 'tbl' }, [
       h('thead', {}, h('tr', {}, [h('th', {}, '门店'), h('th', {}, '城市'), h('th', { class: 'num' }, '应完成'), h('th', { class: 'num' }, '已完成'), h('th', { class: 'num' }, '完成率'), h('th', { class: 'num' }, '按时率'), h('th', { class: 'num' }, '逾期完成'), h('th', { class: 'num' }, '未完成')])),
-      h('tbody', {}, rank.map(r => h('tr', { style: r.storeId === me.id ? { background: 'var(--brand-50)', fontWeight: '600' } : null }, [
+      h('tbody', {}, rank.map(r => h('tr', { style: r.storeId === me.id ? { background: 'var(--brand-50)', fontWeight:'700' } : null }, [
         h('td', {}, r.store.name + (r.storeId === me.id ? '（本店）' : '')),
         h('td', {}, r.city),
         h('td', { class: 'num' }, String(r.expected)),
