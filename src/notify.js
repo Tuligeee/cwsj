@@ -251,9 +251,9 @@ function build(now) {
             title: '新任务已下发',
             body: ['**新任务已下发**', '',
               '- 任务：' + task.title,
-              occActive ? ('- 截止：' + dueText)
-                        : ('- 首次到期：' + fmt(firstDue) + '（' + (task.startDate || '') + ' 起执行）'),
-              '- 门店：' + store.name, '',
+              occActive ? ('- 截止时间：' + dueText)
+                        : ('- 截止时间：' + fmt(firstDue) + '（首次，' + (task.startDate || '') + ' 起执行）'),
+              '- 部门：' + (task.dept || '—'), '',
               '[立即查看并提交](' + taskLink(task.id) + ')'].join('\n'),
           }));
         }
@@ -267,7 +267,7 @@ function build(now) {
             title: '任务即将到期',
             body: ['**任务即将到期（还剩 ' + left + '）**', '',
               '- 任务：' + task.title,
-              '- 截止：' + dueText,
+              '- 截止时间：' + dueText,
               '- 当前状态：未提交', '',
               '[现在去提交](' + taskLink(task.id) + ')'].join('\n'),
           }));
@@ -280,7 +280,7 @@ function build(now) {
             title: '任务已逾期',
             body: ['**任务已逾期**', '',
               '- 任务：' + task.title,
-              '- 原定截止：' + dueText,
+              '- 截止时间：' + dueText,
               '- 当前状态：逾期未提交', '',
               '[立即补交](' + taskLink(task.id) + ')'].join('\n'),
           }));
@@ -295,8 +295,8 @@ function build(now) {
                 title: '任务仍未提交',
                 body: ['**任务仍未提交（第 ' + days + ' 天）**', '',
                   '- 任务：' + task.title,
-                  '- 原定截止：' + dueText,
-                  '- 请尽快补交并说明原因', '',
+                  '- 截止时间：' + dueText,
+                  '- 当前状态：逾期未提交', '',
                   '[去提交](' + taskLink(task.id) + ')'].join('\n'),
               }));
             }
