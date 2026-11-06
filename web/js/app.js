@@ -7,37 +7,37 @@ const ROUTES = {
     {
       /* 周期不再拆成 4 个导航项，合并成一个「我的任务」页，页内用「今日/本周/本月/全部」筛选
          专项任务(once) 排序规则不同，保留为独立入口 */
-      g: '我的任务', items: [{ id: 'tasks', label: '我的任务', icon: '☀️' }]
+      g: '我的任务', items: [{ id: 'tasks', label: '我的任务', iconKey: 'checklist' }]
     },
     {
       g: '需求与协同', items: [
-        { id: 'demands', label: '我的提需', icon: '✉️' },
-        { id: 'contacts', label: '通讯录', icon: '📇' }
+        { id: 'demands', label: '我的提需', iconKey: 'inbox' },
+        { id: 'contacts', label: '通讯录', iconKey: 'book' }
       ]
     },
-    { g: '数据', items: [{ id: 'mystats', label: '我的数据', icon: '📊' }] },
-    { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', icon: '⋯' }] : [] }
+    { g: '数据', items: [{ id: 'mystats', label: '我的数据', iconKey: 'chart' }] },
+    { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', iconKey: 'more' }] : [] }
   ],
   hq: [
     {
       g: '门店协同', items: [
-        { id: 'hq-demands', label: '门店提需', icon: '📥' }
+        { id: 'hq-demands', label: '门店提需', iconKey: 'inbox' }
       ]
     },
     {
       g: '任务管理', items: [
-        { id: 'hq-tasks', label: '任务管理', icon: '📝' },
-        { id: 'hq-board', label: '任务督办看板', icon: '📋' }
+        { id: 'hq-tasks', label: '任务管理', iconKey: 'checklist' },
+        { id: 'hq-board', label: '任务督办看板', iconKey: 'board' }
       ]
     },
     {
       g: '公司', items: [
-        { id: 'hq-contacts', label: '通讯录', icon: '📇' },
-        { id: 'hq-stats', label: '数据统计与考核', icon: '📊' },
-        { id: 'admin', label: '管理员后台', icon: '🛡️', admin: true }
+        { id: 'hq-contacts', label: '通讯录', iconKey: 'book' },
+        { id: 'hq-stats', label: '数据统计与考核', iconKey: 'chart' },
+        { id: 'admin', label: '管理员后台', iconKey: 'shield', admin: true }
       ]
     },
-    { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', icon: '⋯' }] : [] }
+    { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', iconKey: 'more' }] : [] }
   ]
 };
 
@@ -166,7 +166,7 @@ function go(id, silent) {
         dataset: { nav: it.id },        /* 手机端按 id 隐藏部分入口（CSS 里控制，桌面端不受影响） */
         onclick: () => go(it.id)
       }, [
-        h('span', { class: 'ni' }, it.icon),
+        h('span', { class: 'ni', html: iconSvg(it.iconKey || 'dot', 18) }),
         h('span', { class: 'nl', text: it.label }),
         n > 0 ? h('span', { class: 'nav-badge' }, n > 99 ? '99+' : String(n)) : null
       ]);
@@ -174,6 +174,7 @@ function go(id, silent) {
     });
   });
 
+  setPageActions([]);
   const t = PAGE_TITLE[id] || ['工作台', ''];
   $('#page-title').textContent = t[0];
   $('#page-sub').textContent = t[1]
@@ -193,6 +194,14 @@ function go(id, silent) {
   closeBell();
   if (!silent) refreshBell();
 }
+/* 页面级操作（新建/导入）挂顶栏，切页自动清空 */
+function setPageActions(nodes) {
+  const slot = $('#page-actions');
+  if (!slot) return;
+  clear(slot);
+  (nodes || []).filter(Boolean).forEach(n => slot.appendChild(n));
+}
+window.setPageActions = setPageActions;
 function refreshNav() { go(currentRoute, true); }
 
 /* ---------------- 操作日志 ---------------- */
@@ -407,10 +416,7 @@ function bindTopbar() {
   /* 顶栏铃铛已移除：仅当存在时才绑定（兼容旧缓存页面） */
   const bellBtn = $('#bell-btn');
   if (bellBtn) bellBtn.addEventListener('click', e => { e.stopPropagation(); toggleBell(); });
-  $('#theme-btn').addEventListener('click', () => {
-    const cur = document.documentElement.getAttribute('data-theme');
-    applyTheme(cur === 'dark' ? 'light' : 'dark');
-  });
+  /* 夜间模式已下线（2026-11-06），顶栏不再有主题切换按钮 */
   const chip = $('#user-chip'), menu = $('#user-menu');
   chip.addEventListener('click', e => {
     e.stopPropagation();

@@ -27,7 +27,8 @@ function pageHqDemands() {
   /* 状态/分类多选（空 = 全部需求）；默认选中「待我评估」/「我负责处理」 */
   const tabSet = new Set([isCommittee() ? 'review' : 'mine']);
   const statBox = h('div');
-  const tabsBar = h('div', { class: 'tabs chip-tabs' });
+  const tabsBar = h('div', { class: 'tabs chip-tabs seg-track' });
+  const mfBarBoxD = h('div');   /* 手机端药丸容器 */
   const listBox = h('div');
 
   function pool() { return visibleDemands(); }
@@ -85,13 +86,23 @@ function pageHqDemands() {
   function paint() {
     const all = pool();
     clear(statBox);
-    const st = demandStats(365);
-    statBox.appendChild(statRow(5, [
-      statNode(String(all.filter(d => d.status === 'pending').length), '待评估需求', 'info'),
-      statNode(String(all.filter(d => d.status === 'approved').length), '已通过待派发', 'warn'),
-      statNode(String(all.filter(d => d.status === 'assigned').length), '处理中', 'warn'),
-      statNode(String(all.filter(d => d.status === 'completed').length), '待门店确认', 'ok'),
-      statNode(String(all.filter(d => d.status === 'rejected').length), '已驳回', 'danger')
+    const fig = (val, label, cls) => h('div', { class: 'kpi' + (cls ? ' ' + cls : '') }, [
+      h('div', { class: 'kpi-v', text: String(val) }),
+      h('div', { class: 'kpi-l', text: label })
+    ]);
+    const LD = {
+      pending: M2() ? '待评估' : '待评估需求',
+      approved: M2() ? '待派发' : '已通过待派发',
+      assigned: '处理中',
+      completed: M2() ? '待门店确认' : '待门店确认',
+      rejected: M2() ? '已驳回' : '已驳回'
+    };
+    statBox.appendChild(h('div', { class: 'kpi-strip k5' }, [
+      fig(all.filter(d => d.status === 'pending').length, LD.pending),
+      fig(all.filter(d => d.status === 'approved').length, LD.approved),
+      fig(all.filter(d => d.status === 'assigned').length, LD.assigned),
+      fig(all.filter(d => d.status === 'completed').length, M2() ? '待确认' : LD.completed),
+      fig(all.filter(d => d.status === 'rejected').length, LD.rejected)
     ]));
 
     clear(tabsBar);
@@ -103,12 +114,12 @@ function pageHqDemands() {
       class: 'tab' + (tabSet.has(k) ? ' active' : ''), onclick: () => { tabSet.has(k) ? tabSet.delete(k) : tabSet.add(k); paint(); }
     }, [label, h('span', { class: 'cnt' }, String(n))])));
     const hasReview = tabSet.has('review');
-    tabsBar.appendChild(h('span', { class: 'fhint', style: { margin: '0 0 0 6px' }, text: '可多选' }));
 
+    if (typeof paintMobileBar === 'function') paintMobileBar();
     const list = listFor();
     clear(listBox);
     if (!list.length) {
-      listBox.appendChild(emptyNode(hasReview ? '没有待评估的需求 🎉' : '当前筛选下暂无需求', '📥'));
+      listBox.appendChild(emptyNode(hasReview ? '没有待评估的需求' : '当前筛选下暂无需求', null, 'inbox'));
       return;
     }
     const l = h('div', { class: 'task-list' });
@@ -143,18 +154,52 @@ function pageHqDemands() {
     listBox.appendChild(l);
   }
 
-  const toolBar = h('div', { class: 'row', style: { marginBottom: '12px' } }, [
-    h('button', { class: 'btn btn-sm', onclick: exportDemands }, '导出 CSV'),
-    h('button', { class: 'btn btn-sm', style: { marginLeft: 'auto' }, onclick: () => { paint(); toast('已刷新'); } }, '↻ 刷新')
+  /* 手机端药丸回显（放在 paint 之后定义也行：函数提升） */
+  function paintMobileBar() {
+    if (!M2()) return;
+    const one = tabSet.size === 1 ? Array.from(tabSet)[0] : null;
+    const stText = tabSet.size === 0 ? '全部需求'
+      : one ? ((TABS().find(t => t[0] === one) || [0, '已选'])[1]) : '已选 ' + tabSet.size + ' 项';
+    clear(mfBarBoxD);
+    mfBarBoxD.appendChild(h('div', { class: 'mf-bar' }, [
+      filterPill({
+        label: '状态', value: stText, active: tabSet.size > 0,
+        onClick: () => openFilterSheet({
+          title: '需求状态', multi: true,
+          options: [['review', '待我评估'], ['assign', '待派发'], ['mine', '我负责处理'],
+                    ['done', '已完成'], ['rejected', '已驳回'], ['archived', '已归档']]
+            .map(([k, t]) => ({ v: k, t: t })),
+          selected: tabSet, onChange: () => paint()
+        })
+      })
+    ]));
+  }
+
+  /* 页面级操作放顶栏（与任务管理一致） */
+  setPageActions([
+    h('button', { class: 'btn btn-sm', onclick: exportDemands }, '导出 CSV')
   ]);
   paint();
-  wrap.appendChild(toolBar); wrap.appendChild(statBox); wrap.appendChild(tabsBar); wrap.appendChild(listBox);
+  paintMobileBar();
+  if (M2()) {
+    wrap.appendChild(mfBarBoxD);
+  } else {
+    wrap.appendChild(h('div', { class: 'flt-bar' }, [
+      h('div', { class: 'flt-group flt-seg' }, [h('span', { class: 'flt-gl', text: '状态' }), tabsBar]),
+      h('span', { class: 'flt-hint', text: '可多选' })
+    ]));
+  }
+  wrap.appendChild(statBox); wrap.appendChild(listBox);
   return wrap;
 }
 
-function exportDemands() {
+function exportDemands(range) {
   const rows = [['需求编号', '门店', '标题', '期望部门', '状态', '提交时间', '评估人', '评估结果', '评估意见', '责任人', '责任部门', '期望完成', '实际完成', '处理说明', '门店评分']];
-  state.demands.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).forEach(d => {
+  const lo = range ? range.from.getTime() : -Infinity;
+  const hi = range ? new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate(), 23, 59, 59).getTime() : Infinity;
+  state.demands.slice()
+    .filter(d => { const t = new Date(d.createdAt).getTime(); return t >= lo && t <= hi; })
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).forEach(d => {
     rows.push([
       d.code, d.storeName, d.title, d.targetDept || '不限',
       (DEMAND_STATUS[d.status] || {}).label || d.status, ymdhm(d.createdAt),
@@ -290,13 +335,16 @@ function pageHqTasks() {
   const cycleSet = new Set();            // 任务类型多选（每日/每周/每月/专项，空 = 全部）
   const statBox = h('div');
   const scopeBar = h('div', { class: 'm2-toolrow', style: { marginLeft: 'auto' } });
-  const tabsBar = h('div', { class: 'tabs chip-tabs' });
+  const tabsBar = h('div', { class: 'tabs chip-tabs seg-track' });
   const cycleBar = h('div', { class: 'tabs chip-tabs' });
+  const clearSlot = h('span', { class: 'flt-clear-slot' });
   const listBox = h('div');
   /* 筛选行标签（与任务来源行同宽，保证两行选项左对齐） */
-  const statusLabel = h('span', { class: 'flt-k', text: '任务状态' });
+  const statusLabel = null; /* 标签已内联到 .flt-group，保留变量避免旧引用报错 */
   /* 手机端的部门筛选：与其他页一致，渲染成 .tabs 交给 m2-ui 收进弹窗 */
   const deptBar = h('div');
+  const mfBarBox = h('div');   /* 手机端药丸容器，paint 时重建以回显筛选状态 */
+  let repaintDept = null;   /* paintDeptBar 在下面的块里定义，这里留一个函数级引用给 paint 用 */
 
   /** 当前「任务来源」选中的范围说明 */
   function scopeTip() {
@@ -339,6 +387,67 @@ function pageHqTasks() {
     ]));
   }
 
+  function renderActions() {
+    const anyFilter = deptSet.size || cycleSet.size || tabSet.size !== 1 || !tabSet.has('active');
+    setPageActions([
+      anyFilter ? h('button', {
+        class: 'btn btn-sm btn-ghost',
+        onclick: () => {
+          deptSet.clear(); cycleSet.clear(); tabSet.clear(); tabSet.add('active');
+          if (typeof cycleFilter !== 'undefined' && cycleFilter) cycleFilter.refresh();
+          paint();
+        }
+      }, '清除筛选') : null,
+      M2() ? null : h('button', {
+        class: 'btn btn-sm',
+        onclick: () => (window.CwsjImport ? window.CwsjImport.open(paintAll) : toast('批量导入模块未加载，请刷新页面', 'err'))
+      }, '批量导入'),
+      h('button', { class: 'btn btn-sm btn-primary', onclick: () => openTaskForm(null, paintAll) }, '+ 新建任务')
+    ]);
+  }
+
+  /* 手机端筛选：三颗药丸，选项进底部弹层（2026-11-06） */
+  function buildMobileBar() {
+    const stText = tabSet.size === 1 && tabSet.has('stopped') ? '已停止'
+      : tabSet.size === 1 && tabSet.has('active') ? '进行中' : '全部';
+    const deptText = deptSet.size === 0 ? '全部'
+      : deptSet.size === 1 ? Array.from(deptSet)[0] : '已选 ' + deptSet.size + ' 个';
+    const cycText = cycleSet.size === 0 ? '全部'
+      : cycleSet.size === 1 ? (CYCLE_LABEL[Array.from(cycleSet)[0]] || '1 项') : '已选 ' + cycleSet.size + ' 个';
+    return h('div', { class: 'mf-bar' }, [
+      filterPill({
+        label: '状态', value: stText, active: stText !== '全部',
+        onClick: () => {
+          const cur = new Set(tabSet.size === 1 ? Array.from(tabSet) : []);
+          openFilterSheet({
+            title: '任务状态', multi: false,
+            options: [{ v: 'active', t: '进行中' }, { v: 'stopped', t: '已停止' }],
+            selected: cur,
+            onChange: () => { tabSet.clear(); if (cur.size) tabSet.add(Array.from(cur)[0]); paint(); }
+          });
+        }
+      }),
+      filterPill({
+        label: '部门', value: deptText, active: deptSet.size > 0, count: deptSet.size || '',
+        onClick: () => openFilterSheet({
+          title: '部门', multi: true,
+          options: Array.from(new Set(state.tasks.map(t => t.dept).filter(Boolean)))
+            .map(d => ({ v: d, t: d, n: state.tasks.filter(x => x.dept === d).length })),
+          selected: deptSet, onChange: () => paint()
+        })
+      }),
+      filterPill({
+        label: '类型', value: cycText, active: cycleSet.size > 0, count: cycleSet.size || '',
+        onClick: () => openFilterSheet({
+          title: '任务类型', multi: true,
+          options: [['daily', '每日必做'], ['weekly', '每周必做'], ['monthly', '每月必做'], ['once', '专项任务']]
+            .map(([k, t]) => ({ v: k, t: t, n: state.tasks.filter(x => x.cycle === k).length })),
+          selected: cycleSet, onChange: () => paint()
+        })
+      })
+    ]);
+  }
+
   function paint() {
     const src = sourceItems();
     let overdueTotal = 0, dueTotal = 0, doneTotal = 0, expTotal = 0;
@@ -348,44 +457,55 @@ function pageHqTasks() {
     });
     const actN = src.filter(t => t.status === 'active').length;
 
-    /* 任务类型：每日/每周/每月/专项（可多选，空 = 全部） */
-    clear(cycleBar);
-    {
-      const scoped = deptSet.size ? src.filter(t => deptSet.has(t.dept)) : src;
-      [['daily', '每日必做'], ['weekly', '每周必做'], ['monthly', '每月必做'], ['once', '专项任务']].forEach(([k, l]) => {
-        const on = cycleSet.has(k);
-        const n = scoped.filter(t => t.cycle === k).length;
-        cycleBar.appendChild(h('div', {
-          class: 'tab' + (on ? ' active' : ''),
-          onclick: () => { on ? cycleSet.delete(k) : cycleSet.add(k); paint(); }
-        }, [h('span', { text: l }), h('span', { class: 'cnt' }, String(n))]));
-      });
-    }
+    /* 类型下拉的数量随部门筛选联动（cycleFilter 在下面定义，paint 首次调用时已存在） */
+    if (typeof cycleFilter !== 'undefined' && cycleFilter) cycleFilter.refresh();
+
+    /* 顶栏操作随筛选状态刷新 */
+    renderActions();
+    /* 手机端药丸回显 */
+    if (M2() && mfBarBox) { clear(mfBarBox); mfBarBox.appendChild(buildMobileBar()); }
 
     clear(tabsBar);
     tabsBar.appendChild(h('div', {
       class: 'tab' + (tabSet.size === 0 ? ' active' : ''),
       onclick: () => { tabSet.clear(); paint(); }
-    }, [h('span', { text: '全部状态' }), h('span', { class: 'cnt' }, String(src.length))]));
+    }, [h('span', { text: '全部' }), h('span', { class: 'cnt' }, String(src.length))]));
     [['active', '进行中', actN], ['stopped', '已停止', src.length - actN]].forEach(([k, l, n]) => tabsBar.appendChild(h('div', {
       class: 'tab' + (tabSet.has(k) ? ' active' : ''), onclick: () => { tabSet.has(k) ? tabSet.delete(k) : tabSet.add(k); paint(); }
     }, [l, h('span', { class: 'cnt' }, String(n))])));
 
     clear(statBox);
-    const statNodes = [
-      statNode(String(overdueTotal), '逾期未完成门店数', overdueTotal ? 'danger' : 'ok'),
-      statNode(String(dueTotal), '即将到期门店数', dueTotal ? 'warn' : 'ok'),
-      statNode(expTotal ? pct(doneTotal, expTotal).toFixed(1) + '%' : '—', '本期整体完成率', 'info')
-    ];
-    if (!M2()) statNodes.unshift(statNode(String(actN), '进行中任务数（' + scopeTip() + '）'));
-    statBox.appendChild(statRow(statNodes.length, statNodes));
+    /* KPI 条：一块面板 + 内部发丝线，主指标左宽，其余降级读数（第二批 v2） */
+    const coverN = new Set(src.filter(t => t.status === 'active').flatMap(t => t.storeIds)).size;
+    const fig = (val, label, cls) => h('div', { class: 'kpi' + (cls ? ' ' + cls : '') }, [
+      h('div', { class: 'kpi-v', text: String(val) }),
+      h('div', { class: 'kpi-l', text: label })
+    ]);
+    /* 手机上列宽只有 90px，标签用短名，避免折行 */
+    const L = {
+      doing: M2() ? '进行中' : '进行中任务',
+      overdue: M2() ? '逾期门店' : '逾期未提交门店',
+      due: M2() ? '即将到期' : '即将到期门店',
+      rate: M2() ? '完成率' : '本期完成率'
+    };
+    statBox.appendChild(h('div', { class: 'kpi-strip' }, [
+      h('div', { class: 'kpi-main' }, [
+        h('span', { class: 'kpi-v', text: String(actN) }),
+        h('div', { class: 'kpi-lblock' }, [
+          h('div', { class: 'kpi-l', text: L.doing })
+        ])
+      ]),
+      fig(overdueTotal, L.overdue, overdueTotal ? 'is-danger' : ''),
+      fig(dueTotal, L.due, dueTotal ? 'is-warn' : ''),
+      fig(expTotal ? pct(doneTotal, expTotal).toFixed(1) + '%' : '—', L.rate)
+    ]));
 
     const list = base();
     clear(listBox);
     if (!list.length) {
       listBox.appendChild(emptyNode(scopeSet.size === 0 ? '未选择任务来源，当前没有可显示的任务'
         : (scopeSet.size === 1 && scopeSet.has('mine') ? '还没有你发布的任务，点击右上角「新建任务」下发'
-          : '当前筛选下没有任务'), '📝'));
+          : '当前筛选下没有任务'), null, 'checklist'));
       return;
     }
     const l = h('div', { class: 'task-list' });
@@ -400,26 +520,51 @@ function pageHqTasks() {
   const topRow = h('div', { class: 'hq-top' });
   wrap.appendChild(topRow);
   {
-    /* 需求：chipMulti 的选中态在点击时不改 class，所以这里必须重建整条，选中态才看得见 */
-    const paintDeptBar = () => {
-      clear(deptBar);
-      deptBar.classList.add('flt-row', 'flt-row-actions');
-      const uniq = Array.from(new Set(state.tasks.map(t => t.dept).filter(Boolean)));
-      deptBar.appendChild(h('span', { class: 'flt-k', text: '发布部门' }));
-      if (uniq.length) {
-        /* 带上各部门任务数，让这一行与「任务类型 / 任务状态」视觉等重 */
-        const cnt = {};
-        state.tasks.forEach(t => { if (t.dept) cnt[t.dept] = (cnt[t.dept] || 0) + 1; });
-        deptBar.appendChild(chipMulti(uniq.map(d => ({ v: d, t: d, n: cnt[d] || 0 })), deptSet, () => { paintDeptBar(); paintAll(); }));
-      }
-    };
-    paintDeptBar();
-    const panel = h('div', { class: 'flt' });
-    panel.appendChild(deptBar);
-    deptBar.appendChild(scopeBar);
-    panel.appendChild(h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: '任务类型' }), cycleBar]));
-    panel.appendChild(h('div', { class: 'flt-row' }, [statusLabel, tabsBar]));
-    wrap.appendChild(panel);
+    /* 部门：平铺胶囊 + 溢出折叠（方案 A） */
+    deptBar.classList.add('flt-group');
+    deptBar.appendChild(h('span', { class: 'flt-gl', text: '部门' }));
+    {
+      const cnt0 = {};
+      state.tasks.forEach(t => { if (t.dept) cnt0[t.dept] = (cnt0[t.dept] || 0) + 1; });
+      const deptFilter = chipFilterWithMore({
+        label: '部门', max: 4,
+        options: () => Array.from(new Set(state.tasks.map(t => t.dept).filter(Boolean)))
+          .map(d => ({ v: d, t: d, n: cnt0[d] || 0 })),
+        selected: deptSet,
+        onChange: () => { paintAll(); }
+      });
+      deptBar.appendChild(deptFilter.el);
+      repaintDept = () => deptFilter.refresh();
+    }
+
+    /* 类型：同样平铺，4 个以内不会折叠 */
+    cycleBar.classList.add('flt-group');
+    cycleBar.appendChild(h('span', { class: 'flt-gl', text: '类型' }));
+    const cycleFilter = chipFilterWithMore({
+      label: '类型', max: 4,
+      options: () => {
+        const scoped = deptSet.size ? state.tasks.filter(t => deptSet.has(t.dept)) : state.tasks;
+        return [['daily', '每日'], ['weekly', '每周'], ['monthly', '每月'], ['once', '专项']]
+          .map(([k, l]) => ({ v: k, t: l, n: scoped.filter(t => t.cycle === k).length }));
+      },
+      selected: cycleSet,
+      onChange: () => paint()
+    });
+    cycleBar.appendChild(cycleFilter.el);
+    /* 手机：药丸 + 弹层；桌面：状态底板 + 矩形标签（2026-11-06） */
+    if (M2()) {
+      wrap.appendChild(mfBarBox);
+    } else {
+      const bar = h('div', { class: 'flt-bar' }, [
+        h('div', { class: 'flt-group flt-seg' }, [h('span', { class: 'flt-gl', text: '状态' }), tabsBar]),
+        h('span', { class: 'flt-sep' }),
+        deptBar,
+        h('span', { class: 'flt-sep' }),
+        cycleBar
+      ]);
+      wrap.appendChild(bar);
+    }
+
   }
   wrap.appendChild(statBox); wrap.appendChild(listBox);
   return wrap;
@@ -429,7 +574,14 @@ function pageHqTasks() {
 function taskAdminCard(t, refresh) {
   const p = taskProgress(t);
   const m = t.status === 'active' ? null : { label: '已停止', tag: 'tag-gray' };
-  const card = h('div', { class: 'task-card' + (p.overdue ? ' st-overdue' : p.dueSoon ? ' st-due' : ''), dataset: { taskId: t.id || '' } });
+  /* 状态只在异常时才上色：正常态中性，临期黄、逾期红、已停止灰 */
+  const stCls = t.status !== 'active' ? ' st-stopped' : (p.overdue ? ' st-overdue' : p.dueSoon ? ' st-due' : '');
+  const openDetail = () => openTaskDetail({ task: t, due: occDue(t, new Date()), key: occKey(t, new Date()), rec: null, status: 'normal' });
+  const card = h('div', {
+    class: 'task-card hq-card' + stCls, dataset: { taskId: t.id || '' },
+    title: '点击查看进度明细',
+    onclick: (ev) => { if (ev.target.closest('a,button,img')) return; openDetail(); }
+  });
   card.appendChild(h('div', { class: 'tc-head' }, [
     h('div', { style: { flex: '1', minWidth: '0' } }, [
       h('div', { class: 'tc-title', text: t.title }),
@@ -438,11 +590,12 @@ function taskAdminCard(t, refresh) {
         h('span', {}, cycleDesc(t)),
         h('span', { class: 'sep' }, '·'),
         h('span', {}, t.dept + ' · ' + t.creatorName),
-        h('span', { class: 'sep' }, '·'),
-        h('span', {}, '重要程度'),
-        starsNode(t.priority),
-        h('span', { class: 'sep' }, '·'),
-        h('span', {}, '发布于 ' + ymd(t.createdAt))
+        /* 手机上只留「类型 / 时间 / 部门·人」，重要程度与发布日进详情看 */
+        M2() ? null : h('span', { class: 'sep' }, '·'),
+        M2() ? null : h('span', {}, '重要程度'),
+        M2() ? null : starsNode(t.priority),
+        M2() ? null : h('span', { class: 'sep' }, '·'),
+        M2() ? null : h('span', {}, '发布于 ' + ymd(t.createdAt))
       ])
     ]),
     h('div', { class: 'tc-right' }, [
@@ -459,43 +612,46 @@ function taskAdminCard(t, refresh) {
   const tLink = (typeof linksNode === 'function') ? linksNode(t.links) : null;
   if (tLink) card.appendChild(tLink);
 
-  /* 进度 */
+  /* 进度：一条 + 右侧数字，不再重复文案 */
   const rateCls = p.rate >= 90 ? 'ok' : p.rate >= 60 ? '' : 'danger';
-  card.appendChild(h('div', { class: 'mt10' }, [
-    h('div', { class: 'row', style: { justifyContent: 'space-between', marginBottom: '5px' } }, [
-      h('span', { class: 'fhint', style: { margin: '0' }, text: '本期进度：' + p.done + ' / ' + p.expected + ' 家门店已完成（覆盖 ' + t.storeIds.length + ' 家）' }),
-      h('span', { style: { fontSize: '12.5px', fontWeight:'700' }, text: p.rate.toFixed(1) + '%' })
-    ]),
-    progressNode(p.rate, rateCls)
+  card.appendChild(h('div', { class: 'tc-progress' }, [
+    h('div', { class: 'tc-bar' }, progressNode(p.rate, rateCls)),
+    h('span', { class: 'tc-num', text: p.done + '/' + p.expected + ' · ' + p.rate.toFixed(0) + '%' })
   ]));
 
-  const btns = h('div', { class: 'row' }, [
-    h('button', { class: 'btn btn-sm', onclick: () => openTaskDetail({ task: t, due: occDue(t, new Date()), key: occKey(t, new Date()), rec: null, status: 'normal' }) }, '进度明细'),
-    h('button', { class: 'btn btn-sm', onclick: () => openTaskBoardFor(t) }, '督办看板'),
-    t.creatorId === me.id || isCommittee() ? h('button', { class: 'btn btn-sm', onclick: () => openTaskForm(t, refresh) }, '编辑') : null,
-    t.status === 'active'
-      ? h('button', {
-        class: 'btn btn-sm', onclick: () => confirmDialog({
-          title: '停止任务', message: '停止后该任务不再生成新的周期实例，已产生的完成记录会保留。\n（适用于每日/每周/每月必做任务）',
-          okText: '停止任务', onOk: () => { stopTask(t.id); toast('任务已停止'); refresh(); }
-        })
-      }, '停止')
-      : h('button', { class: 'btn btn-sm btn-primary', onclick: () => { resumeTask(t.id); toast('任务已恢复运行', 'ok'); refresh(); } }, '恢复运行'),
-    t.creatorId === me.id ? h('button', {
-      class: 'btn btn-sm btn-del-task', onclick: () => confirmDialog({
-        title: '删除任务', message: '删除后任务及其全部完成记录将不可恢复，确定继续？', danger: true, okText: '删除',
-        onOk: () => { removeTask(t.id); toast('任务已删除'); refresh(); }
-      })
-    }, '删除') : null
-  ]);
-  card.appendChild(h('div', { class: 'tc-foot' }, [
-    h('div', { class: 'row' }, [
-      h('span', { class: 'fhint', style: { margin: '0' }, text: '提醒：' + desclineText(t) }),
-      h('span', { class: 'sep', style: { color: 'var(--line)' } }, '|'),
-      h('span', { class: 'fhint', style: { margin: '0' }, text: t.startDate ? ('生效 ' + t.startDate + (t.stopDate ? ' ~ ' + t.stopDate : ' 起长期运行')) : '长期运行' })
-    ]),
-    btns
-  ]));
+  /* 只留 ⋯ 菜单；主操作变成整卡点击（破坏性操作仍带二次确认） */
+  const moreBtn = h('button', {
+    class: 'btn-more', title: '更多操作', html: iconSvg('more', 16),
+    onclick: (ev) => {
+      ev.stopPropagation();
+      const items = [
+        ['进度明细', () => openDetail()],
+        ['督办看板', () => openTaskBoardFor(t)],
+        (t.creatorId === me.id || isCommittee()) ? ['编辑', () => openTaskForm(t, refresh)] : null,
+        t.status === 'active'
+          ? ['停止任务', () => confirmDialog({
+            title: '停止任务', message: '停止后该任务不再生成新的周期实例，已产生的完成记录会保留。', okText: '停止任务',
+            onOk: () => { stopTask(t.id); toast('任务已停止'); refresh(); }
+          })]
+          : ['恢复运行', () => { resumeTask(t.id); toast('任务已恢复运行', 'ok'); refresh(); }],
+        t.creatorId === me.id ? ['删除任务', () => confirmDialog({
+          title: '删除任务', message: '删除后任务及其全部完成记录将不可恢复，确定继续？', danger: true, okText: '删除',
+          onOk: () => { removeTask(t.id); toast('任务已删除'); refresh(); }
+        }), 'danger'] : null
+      ].filter(Boolean);
+      const r = ev.currentTarget.getBoundingClientRect();
+      const pop = h('div', { class: 'menu-pop', style: { top: (r.bottom + 6) + 'px', left: Math.max(8, r.right - 150) + 'px' } },
+        items.map(([label, fn, cls]) => h('button', {
+          class: cls || '',
+          onclick: (e2) => { e2.stopPropagation(); pop.remove(); document.removeEventListener('click', close); fn(); }
+        }, label)));
+      const close = () => { pop.remove(); document.removeEventListener('scroll', close, true); };
+      document.body.appendChild(pop);
+      setTimeout(() => document.addEventListener('click', close), 0);
+      document.addEventListener('scroll', close, true);
+    }
+  });
+  card.appendChild(moreBtn);
   return card;
 }
 
@@ -749,7 +905,7 @@ function openTaskForm(task, onDone, opts) {
 let _boardFilter = { dept: new Set(), cycle: new Set(), status: new Set(), onlyProblem: false };
 function pageHqBoard() {
   const wrap = h('div');
-  const filterBox = h('div', { class: 'flt' });
+  const filterBox = h('div', { class: M2() ? 'flt-bare' : 'flt' });
   const boardBox = h('div');
 
   function tasksFiltered() {
@@ -796,7 +952,7 @@ function pageHqBoard() {
     groups.forEach(g => hr1.appendChild(h('th', { colspan: String(g.items.length) }, g.city)));
     hr1.appendChild(h('th', { class: 'prog-col', rowspan: '2', text: '本期进度' }));
     const hr2 = h('tr');
-    hr2.appendChild(h('th', { class: 'task-col' }, h('span', { style: { fontSize: '11px', color: 'var(--text-3)' }, text: '任务 / 门店' })));
+    hr2.appendChild(h('th', { class: 'task-col' }, h('span', { class: 'bm-corner', text: '任务 / 门店' })));
     groups.forEach(g => g.items.forEach(it => hr2.appendChild(h('th', {
       class: 'store-col', title: it.s.name
     }, [h('b', { text: g.city }), h('span', { text: it.branch })]))));
@@ -807,25 +963,31 @@ function pageHqBoard() {
       const p = taskProgress(t);
       const tr = h('tr');
       tr.appendChild(h('td', { class: 'task-col' }, [
-        h('div', { style: { fontWeight:'700', fontSize: '12.5px', lineHeight: '1.4' } }, t.title),
-        h('div', { class: 'row', style: { marginTop: '4px' } }, [
+        h('div', { class: 'bm-title', text: t.title }),
+        h('div', { class: 'bm-meta' }, [
           tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle]),
-          h('span', { style: { fontSize: '11px', color: 'var(--text-3)' }, text: cycleDesc(t) + ' · ' + t.dept })
+          h('span', { class: 'bm-sub', text: cycleDesc(t) + ' · ' + t.dept })
         ])
       ]));
       stores.forEach(s => {
         const cell = p.cells.find(c => c.storeId === s.id);
         const st = cell ? cell.status : 'na';
         const M = STATUS_META[st] || STATUS_META.na;
-        const glyph = st === 'done' ? '✓' : st === 'late' ? '✓' : st === 'overdue' ? '逾期' : st === 'due' ? '临期' : st === 'normal' ? '待' : '\u2013';
+        /* 逾期不再写文字：浅红块即可，悬停显示逾期时长（2026-11-06） */
+        const glyph = st === 'done' || st === 'late' ? '✓' : '';
+        let tip = s.name + '：' + M.label;
+        if (st === 'overdue' && cell && cell.due) {
+          const hrs = Math.max(1, Math.floor((Date.now() - new Date(cell.due).getTime()) / 3600000));
+          tip = s.name + '：逾期 ' + (hrs < 24 ? hrs + ' 小时' : Math.floor(hrs / 24) + ' 天');
+        }
         const td = h('td', {}, h('div', {
-          class: 'cell ' + (st === 'na' ? 'na' : st), title: s.name + '：' + M.label,
+          class: 'cell ' + (st === 'na' ? 'na' : st), title: tip,
           onclick: st === 'na' ? null : (() => openCellDetail(t, s.id, cell))
         }, glyph));
         tr.appendChild(td);
       });
       tr.appendChild(h('td', { class: 'prog-col' }, [
-        h('div', { style: { fontSize: '12px', fontWeight:'700' }, text: p.done + '/' + p.expected }),
+        h('div', { class: 'bm-prog', text: p.done + '/' + p.expected }),
         progressNode(p.rate, p.rate >= 90 ? 'ok' : p.rate >= 60 ? '' : 'danger')
       ]));
       tbody.appendChild(tr);
@@ -833,74 +995,174 @@ function pageHqBoard() {
     const table = h('table', { class: 'matrix tbl' }, [thead, tbody]);
     boardBox.appendChild(h('div', { class: 'tbl-wrap', style: { maxHeight: 'calc(100vh - 300px)' } }, table));
     boardBox.appendChild(h('div', { class: 'row mt10' }, [
-      h('span', { class: 'fhint', style: { margin: '0' }, text: '图例：' }),
+      h('span', { class: 'bm-legend', text: '图例' }),
       ...['done', 'late', 'due', 'overdue', 'normal'].map(k => h('span', { class: 'row', style: { gap: '4px' } }, [
-        h('span', { class: 'cell ' + k, style: { width: '34px', height: '20px', borderRadius: '5px' } }),
+        h('span', { class: 'cell legend-sw ' + k }),
         h('span', { class: 'fhint', style: { margin: '0' }, text: STATUS_META[k].label })
       ])),
-      h('span', { class: 'fhint', style: { margin: '0' }, text: '｜ 点击单元格查看门店反馈' })
+      h('span', { class: 'bm-legend bm-legend-tail', text: '点击单元格查看门店反馈' })
     ]));
   }
 
 
-  /* 手机端督办看板：一任务一卡，门店状态收进明细 */
+  /* 手机端督办看板（2026-11-06 重设计）：
+     ① 汇总条：逾期门店 / 临期 / 完成率
+     ② 任务行：一行看清 完成几/共几、逾期几家；点开直接在行内铺门店状态格 */
   function paintCards(list) {
-    const box = h('div');
+    const box = h('div', { class: 'bd' });
+
+    /* ---- 汇总条 ---- */
+    const sum = list.reduce((a, t) => {
+      const p = taskProgress(t);
+      a.overdue += p.overdue; a.due += p.dueSoon; a.done += p.done; a.exp += p.expected;
+      return a;
+    }, { overdue: 0, due: 0, done: 0, exp: 0 });
+    const rate = sum.exp ? (sum.done / sum.exp * 100) : 0;
+    box.appendChild(h('div', { class: 'bd-sum' }, [
+      h('div', { class: 'bd-sum-i' + (sum.overdue ? ' od' : '') }, [
+        h('span', { class: 'bd-sum-v', text: String(sum.overdue) }),
+        h('span', { class: 'bd-sum-l', text: '逾期门店' })
+      ]),
+      h('div', { class: 'bd-sum-i' + (sum.due ? ' due' : '') }, [
+        h('span', { class: 'bd-sum-v', text: String(sum.due) }),
+        h('span', { class: 'bd-sum-l', text: '即将到期' })
+      ]),
+      h('div', { class: 'bd-sum-i' }, [
+        h('span', { class: 'bd-sum-v', text: rate.toFixed(0) + '%' }),
+        h('span', { class: 'bd-sum-l', text: '总体完成' })
+      ])
+    ]));
+
+    /* ---- 任务行 ---- */
+    const rows = h('div', { class: 'bd-rows' });
     list.forEach(t => {
       const p = taskProgress(t);
-      const done = p.done || 0, exp = p.expected || 0;
-      const overdue = p.overdue || 0, due = p.dueSoon || 0;
-      box.appendChild(h('div', { class: 'bcard', onclick: () => openBoardTaskDetail(t) }, [
-        h('div', { class: 'bcard-top' }, [
-          tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle]),
-          h('span', { class: 'bcard-cnt', text: done + '/' + exp + ' 家完成' })
+      const pct = Math.round(p.rate);
+      const row = h('div', { class: 'bd-row' + (p.overdue ? ' od' : '') });
+      const head = h('button', { class: 'bd-head', type: 'button' }, [
+        h('div', { class: 'bd-left' }, [
+          h('div', { class: 'bd-title', text: t.title }),
+          h('div', { class: 'bd-meta', text: cycleDesc(t) + ' · ' + t.dept }),
+          h('div', { class: 'bd-bar' }, progressNode(p.rate, pct >= 90 ? 'ok' : pct >= 60 ? '' : 'danger')),
+          h('div', { class: 'bd-tags' }, [
+            p.overdue ? h('span', { class: 'bd-tag od', text: '逾期 ' + p.overdue }) : null,
+            p.dueSoon ? h('span', { class: 'bd-tag due', text: '临期 ' + p.dueSoon }) : null,
+            h('span', { class: 'bd-tag ok', text: '完成 ' + p.done + '/' + p.expected })
+          ])
         ]),
-        h('div', { class: 'bcard-title', text: t.title }),
-        h('div', { class: 'bcard-meta', text: cycleDesc(t) + ' · ' + t.dept }),
-        h('div', { class: 'bcard-progress' }, progressNode(p.rate, p.rate >= 90 ? 'ok' : p.rate >= 60 ? '' : 'danger')),
-        h('div', { class: 'bcard-chips' }, [
-          done ? h('span', { class: 'bc ok', text: '已完成 ' + done }) : null,
-          overdue ? h('span', { class: 'bc bad', text: '逾期 ' + overdue }) : null,
-          due ? h('span', { class: 'bc warn', text: '临期 ' + due }) : null,
-          (!done && !overdue && !due)
-            ? h('span', { class: 'bc', text: exp + ' 家门店都还没交' })
-            : h('span', { class: 'bc', text: '待办 ' + Math.max(0, exp - done) }),
-          h('span', { class: 'bc-go', text: '各店明细 ›' })
+        h('div', { class: 'bd-right' }, [
+          h('span', { class: 'bd-pct', text: pct + '%' }),
+          h('span', { class: 'bd-car', html: iconSvg('chevron', 14) })
         ])
-      ]));
+      ]);
+
+      /* 行内展开：每店一个状态格 */
+      const panel = h('div', { class: 'bd-panel' });
+      let built = false;
+      head.onclick = () => {
+        const open = row.classList.contains('open');
+        rows.querySelectorAll('.bd-row.open').forEach(r => {
+          r.classList.remove('open');
+          const pp = r.querySelector('.bd-panel'); if (pp) pp.style.display = 'none';
+        });
+        if (open) return;
+        row.classList.add('open');
+        if (!built) {
+          const grid = h('div', { class: 'bd-grid' });
+          const storeName = sid => {
+            const s = allStores().find(x => x.id === sid);
+            return s ? s.name : sid;
+          };
+          p.cells.forEach(cc => {
+            const st = cc.status;
+            const short = storeName(cc.storeId).replace(/^.*?(一|二|三)?店$/, m => m);
+            grid.appendChild(h('button', {
+              class: 'bd-cell', type: 'button',
+              onclick: (e) => {
+                e.stopPropagation();
+                if (st === 'na') return;
+                openCellDetail(t, cc.storeId, cc);
+              }
+            }, [
+              h('span', { class: 'cell ' + st, style: { width: '20px', height: '20px', margin: '0 0 4px' } }),
+              h('span', { class: 'bd-cell-n', text: short })
+            ]));
+          });
+          panel.appendChild(grid);
+          panel.appendChild(h('div', { class: 'bd-panel-foot' }, [
+            h('button', { class: 'bd-more', onclick: (e) => { e.stopPropagation(); openBoardTaskDetail(t); } }, '看详细反馈 ›')
+          ]));
+          built = true;
+        }
+        panel.style.display = 'block';
+      };
+
+      row.appendChild(head);
+      row.appendChild(panel);
+      rows.appendChild(row);
     });
+    box.appendChild(rows);
     boardBox.appendChild(box);
-    boardBox.appendChild(h('div', { class: 'row mt10' }, [
-      h('span', { class: 'fhint', style: { margin: '0' }, text: '点任务卡查看每家门店的状态与反馈' })
-    ]));
   }
 
   const problemChk = h('input', { type: 'checkbox' });
   problemChk.checked = !!_boardFilter.onlyProblem;
   problemChk.addEventListener('change', () => { _boardFilter.onlyProblem = problemChk.checked; paint(); });
 
-  /* 多选筛选条 */
+  /* 桌面筛选条：状态=底板页签，部门/类型=矩形标签+更多折叠（与任务管理同一套） */
   function paintFilter() {
     if (M2()) { paintFilterMobile(); return; }
     clear(filterBox);
-    const mkRow = (label, opts, set) => {
-      const row = h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: label })]);
-      row.appendChild(chipMulti(opts, set, () => { paintFilter(); paint(); }));
-      if (set.size) row.appendChild(h('button', {
-        class: 'flt-act', style: { marginLeft: 'auto' },
-        onclick: () => { set.clear(); paintFilter(); paint(); }
-      }, '× 清除'));
-      return row;
-    };
-    filterBox.appendChild(mkRow('发布部门', state.departments.map(d => ({ v: d, t: d })), _boardFilter.dept));
-    filterBox.appendChild(mkRow('任务类型', [
-      { v: 'daily', t: '每日必做' }, { v: 'weekly', t: '每周必做' }, { v: 'monthly', t: '每月必做' }, { v: 'once', t: '专项任务' }
-    ], _boardFilter.cycle));
-    filterBox.appendChild(mkRow('任务状态', [
-      { v: 'active', t: '进行中' }, { v: 'stopped', t: '已停止' }
-    ], _boardFilter.status));
-    filterBox.appendChild(h('div', { class: 'flt-row' }, [
-      h('label', { class: 'switch' }, [problemChk, h('span', { text: '只看有逾期的任务' })])
+    filterBox.className = 'flt-bar';
+
+    const segTabs = h('div', { class: 'tabs chip-tabs seg-track' });
+    const curSt = _boardFilter.status.size === 1 ? Array.from(_boardFilter.status)[0] : '';
+    [['', '全部'], ['active', '进行中'], ['stopped', '已停止']].forEach(([v2, t2]) => {
+      segTabs.appendChild(h('div', {
+        class: 'tab' + (curSt === v2 ? ' active' : ''),
+        onclick: () => { _boardFilter.status.clear(); if (v2) _boardFilter.status.add(v2); paintFilter(); paint(); }
+      }, h('span', { text: t2 })));
+    });
+    filterBox.appendChild(h('div', { class: 'flt-group flt-seg' }, [
+      h('span', { class: 'flt-gl', text: '状态' }), segTabs
+    ]));
+
+    const deptCnt = {};
+    state.tasks.forEach(t => { if (t.dept) deptCnt[t.dept] = (deptCnt[t.dept] || 0) + 1; });
+    filterBox.appendChild(h('div', { class: 'flt-group' }, [
+      h('span', { class: 'flt-gl', text: '部门' }),
+      chipFilterWithMore({
+        label: '部门', max: 4,
+        options: () => state.departments.map(d => ({ v: d, t: d, n: deptCnt[d] || 0 })),
+        selected: _boardFilter.dept,
+        onChange: () => paint()
+      }).el
+    ]));
+
+    const cycCnt = {};
+    state.tasks.forEach(t => { if (t.cycle) cycCnt[t.cycle] = (cycCnt[t.cycle] || 0) + 1; });
+    filterBox.appendChild(h('div', { class: 'flt-group' }, [
+      h('span', { class: 'flt-gl', text: '类型' }),
+      chipFilterWithMore({
+        label: '类型', max: 4,
+        options: () => [['daily', '每日'], ['weekly', '每周'], ['monthly', '每月'], ['once', '专项']]
+          .map(([k, l]) => ({ v: k, t: l, n: cycCnt[k] || 0 })),
+        selected: _boardFilter.cycle,
+        onChange: () => paint()
+      }).el
+    ]));
+
+    filterBox.appendChild(h('button', {
+      class: 'cf-chip' + (_boardFilter.onlyProblem ? ' on' : ''),
+      type: 'button',
+      onclick: () => {
+        _boardFilter.onlyProblem = !_boardFilter.onlyProblem;
+        problemChk.checked = _boardFilter.onlyProblem;
+        paintFilter(); paint();
+      }
+    }, [
+      h('span', { text: '只看有逾期' }),
+      _boardFilter.onlyProblem ? h('span', { class: 'cf-x', html: iconSvg('check', 10) }) : null
     ]));
   }
 
@@ -908,12 +1170,12 @@ function pageHqBoard() {
   function paintFilterMobile() {
     clear(filterBox);
     const pills = [
-      ['发布部门', _boardFilter.dept, state.departments.map(d => ({ v: d, t: d }))],
-      ['任务类型', _boardFilter.cycle, [
+      ['部门', _boardFilter.dept, state.departments.map(d => ({ v: d, t: d }))],
+      ['类型', _boardFilter.cycle, [
         { v: 'daily', t: '每日必做' }, { v: 'weekly', t: '每周必做' },
         { v: 'monthly', t: '每月必做' }, { v: 'once', t: '专项任务' }
       ]],
-      ['任务状态', _boardFilter.status, [{ v: 'active', t: '进行中' }, { v: 'stopped', t: '已停止' }]]
+      ['状态', _boardFilter.status, [{ v: 'active', t: '进行中' }, { v: 'stopped', t: '已停止' }]]
     ];
     const row = h('div', { class: 'm2-fpills' });
     pills.forEach(([label, set, opts]) => row.appendChild(h('button', {
@@ -955,13 +1217,9 @@ function pageHqBoard() {
     });
   }
   paintFilter();
-  if (!M2()) {
-    /* 导出按钮并入筛选面板最后一行右侧，不再单独占一条空行 */
-    const lastRow = filterBox.querySelector('.flt-row:last-of-type');
-    (lastRow || filterBox).appendChild(h('button', {
-      class: 'flt-act', style: { marginLeft: 'auto' }, onclick: exportBoard
-    }, '导出督办表 CSV'));
-  }
+  setPageActions([
+    M2() ? null : h('button', { class: 'btn btn-sm', onclick: exportBoard }, '导出督办表 CSV')
+  ]);
 
   paint();
   wrap.appendChild(filterBox); wrap.appendChild(boardBox);
@@ -1058,9 +1316,19 @@ function tasksFilteredForExport() {
    ========================================================= */
 function pageHqStats() {
   const wrap = h('div');
-  let days = 30;
+  /* 统计区间：默认「本月」（1 号 ~ 今天） */
+  const _now0 = new Date();
+  let range = {
+    from: new Date(_now0.getFullYear(), _now0.getMonth(), 1),
+    to: new Date(_now0.getFullYear(), _now0.getMonth(), _now0.getDate())
+  };
+  const rangeDays = () => Math.round((range.to - range.from) / 86400000) + 1;
+  const rangeEnd = () => new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate(), 23, 59, 59);
+  const rangeText = () => range.from.getFullYear() + '-' + String(range.from.getMonth() + 1).padStart(2, '0') + '-' + String(range.from.getDate()).padStart(2, '0')
+    + ' ~ ' + range.to.getFullYear() + '-' + String(range.to.getMonth() + 1).padStart(2, '0') + '-' + String(range.to.getDate()).padStart(2, '0');
+  const rangeLabel = () => rangeText() + ' · ' + rangeDays() + ' 天';
   let tab = 'store';
-  const tabsBar = h('div', { class: 'tabs m2-keep' });
+  const tabsBar = h('div', { class: 'tabs chip-tabs m2-keep' });
   const body = h('div');
 
   function paint() {
@@ -1075,38 +1343,43 @@ function pageHqStats() {
   }
 
   function paintStore() {
-    const ov = companyOverview(days);
+    const ov = companyOverview(rangeDays(), rangeEnd());
     const rank = ov.rows.slice().sort((a, b) => b.rate - a.rate);
     const acfg = getAssessCfg();
     const scores = {};
     rank.forEach(r => { scores[r.storeId] = storeAssessScore(r, acfg); });
-    body.appendChild(statRow(5, [
-      statNode(String(ov.total.expected), '全区应完成任务实例'),
-      statNode(String(ov.total.done), '已完成', 'ok'),
-      statNode(ov.total.rate.toFixed(1) + '%', '全区完成率', ov.total.rate >= 90 ? 'ok' : ov.total.rate >= 75 ? 'warn' : 'danger'),
-      statNode(ov.total.ontimeRate.toFixed(1) + '%', '全区按时完成率', ov.total.ontimeRate >= 85 ? 'ok' : 'warn'),
-      statNode(String(ov.total.missed), '逾期未提交', ov.total.missed ? 'danger' : 'ok')
+    /* 主指标独占一块，其余四个收成紧凑小格（不再五张等权卡） */
+    body.appendChild(h('div', { class: 'stats-split' }, [
+      statLead(ov.total.rate.toFixed(1) + '%', '全区完成率',
+        ov.total.done + '/' + ov.total.expected + ' 完成 · ' + ov.total.ontime + ' 按时'),
+      h('div', { class: 'stats-mini' }, [
+        statNode(String(ov.total.expected), '应完成任务实例'),
+        statNode(String(ov.total.done), '已完成'),
+        statNode(String(ov.total.missed), '逾期未提交'),
+        statNode(ov.total.ontimeRate.toFixed(1) + '%', '按时完成率')
+      ])
     ]));
     body.appendChild(h('div', { class: 'fhint', style: { margin: '-2px 0 4px' },
       text: '当前考核规则：' + (acfg.mode === 'step' ? '阶梯得分' : '比例折算') + ' · 基础分 ' + acfg.base
         + '（完成率占 ' + acfg.completionWeight + ' / 按时率占 ' + acfg.ontimeWeight + '）· 逾期提交每次 -' + acfg.lateSubmitDeduct
         + ' · 逾期未交每次 -' + acfg.overdueMissDeduct + ' · 合格线 ' + acfg.passLine + ' 分（点右上角「⚙ 考核设置」可调整）' }));
     body.appendChild(h('div', { class: 'card mt14' }, [
-      h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '各门店完成率排名'), h('div', { class: 'cd', text: '近 ' + days + ' 天 · 用于门店月度考核' })])]),
-      h('div', { class: 'card-body' }, barChart(rank.map(r => ({
+      h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '各门店完成率排名'), h('div', { class: 'cd', text: rangeText() + ' · ' + rangeDays() + ' 天 · 用于门店考核' })])]),
+      h('div', { class: 'card-body' }, rank.every(r => !r.rate) ? emptyNode('本期还没有门店完成记录', null, 'chart') : barChart(rank.map((r, i) => ({
         name: r.store.name,
         value: r.rate,
         text: r.rate.toFixed(1) + '%　(' + r.done + '/' + r.expected + ')',
-        color: r.rate >= 90 ? 'var(--ok)' : r.rate >= 75 ? 'var(--brand)' : r.rate >= 60 ? 'var(--warn)' : 'var(--danger)'
+        /* 颜色不编码数值：全部中性，只有最后一名用红 */
+        color: i === rank.length - 1 ? 'var(--danger)' : 'var(--text-3)'
       })), { max: 100 }))
     ]));
     const grid = h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }, class: 'mt14' });
     grid.appendChild(h('div', { class: 'card' }, [
       h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '全区任务结果构成')])]),
       h('div', { class: 'card-body' }, donutChart([
-        { label: '按时完成', value: ov.total.ontime, color: 'var(--ok)' },
-        { label: '逾期完成', value: ov.total.late, color: 'var(--warn)' },
-        { label: '逾期未提交', value: ov.total.missed, color: 'var(--danger)' }
+        { label: '按时完成', value: ov.total.ontime, color: ov.total.ontime ? 'var(--ok)' : 'var(--text-3)' },
+        { label: '逾期完成', value: ov.total.late, color: ov.total.late ? 'var(--warn)' : 'var(--text-3)' },
+        { label: '逾期未提交', value: ov.total.missed, color: ov.total.missed ? 'var(--danger)' : 'var(--text-3)' }
       ], { centerLabel: '实例数' }))
     ]));
     /* 各周期（按全公司聚合） */
@@ -1120,7 +1393,8 @@ function pageHqStats() {
       h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '各周期完成率'), h('div', { class: 'cd', text: '每日 / 每周 / 每月必做 / 专项任务' })])]),
       h('div', { class: 'card-body' }, barChart(['daily', 'weekly', 'monthly', 'once'].map(k => ({
         name: CYCLE_LABEL[k], value: pct(cycleAgg[k].d, cycleAgg[k].e),
-        text: pct(cycleAgg[k].d, cycleAgg[k].e).toFixed(1) + '%　(' + cycleAgg[k].d + '/' + cycleAgg[k].e + ')'
+        text: pct(cycleAgg[k].d, cycleAgg[k].e).toFixed(1) + '%　(' + cycleAgg[k].d + '/' + cycleAgg[k].e + ')',
+        color: pct(cycleAgg[k].d, cycleAgg[k].e) ? 'var(--brand)' : 'var(--text-3)'
       })), { max: 100 }))
     ]));
     body.appendChild(grid);
@@ -1177,7 +1451,7 @@ function pageHqStats() {
   }
 
   function paintDemand() {
-    const ds = demandStats(days);
+    const ds = demandStats(rangeDays(), rangeEnd(), range.to);
     body.appendChild(statRow(6, [
       statNode(String(ds.total), '本期门店提交需求'),
       statNode(ds.passRate.toFixed(1) + '%', '评估通过率', ds.passRate >= 70 ? 'ok' : 'warn'),
@@ -1203,7 +1477,7 @@ function pageHqStats() {
         name: x.dept, value: x.assigned,
         text: x.assigned + ' 件（完成 ' + x.done + '）',
         color: DEPT_COLOR[x.dept] || 'var(--brand)'
-      }))) : emptyNode('本期没有派发记录', '📭'))
+      }))) : emptyNode('本期没有派发记录', null, 'chart'))
     ]));
     body.appendChild(grid);
 
@@ -1242,7 +1516,7 @@ function pageHqStats() {
   }
 
   function paintPublish() {
-    const tp = taskPublishStats(days);
+    const tp = taskPublishStats(rangeDays(), rangeEnd(), range.to);
     const list = tp.byDept.slice().sort((a, b) => b.tasks - a.tasks);
     const totalTasks = list.reduce((a, b) => a + b.tasks, 0);
     const totalCovers = list.reduce((a, b) => a + b.covers, 0);
@@ -1290,13 +1564,21 @@ function pageHqStats() {
     return g === '优秀' ? 'tag-green' : g === '合格' ? 'tag-blue' : g === '待改进' ? 'tag-yellow' : g === '不合格' ? 'tag-red' : 'tag-gray';
   }
 
+  const rangeBtn = h('button', {
+    class: 'btn btn-sm dr-trigger', type: 'button', title: '选择统计区间',
+    onclick: () => openDateRange({
+      from: range.from, to: range.to,
+      onPick: r => { range = r; rangeBtn.lastChild.textContent = rangeLabel(); paint(); }
+    })
+  }, [
+    h('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 11h18"/></svg>' }),
+    h('span', { text: rangeLabel() })
+  ]);
   const toolBar = h('div', { class: 'row', style: { marginBottom: '12px', flexWrap: 'wrap', gap: '10px', alignItems: 'center' } }, [
-    selectNode([{ v: 7, t: '近 7 天' }, { v: 30, t: '近 30 天' }, { v: 60, t: '近 60 天' }], days, {
-      style: { width: '130px' }, onchange: e => { days = Number(e.target.value); paint(); }
-    }),
+    rangeBtn,
     h('span', { style: { flex: '1' } }),
     h('button', { class: 'btn btn-sm btn-primary', onclick: () => openAssessSettingsModal(paint) }, '⚙ 考核设置'),
-    h('button', { class: 'btn btn-sm', onclick: () => { exportDemands(); } }, '导出需求台账')
+    h('button', { class: 'btn btn-sm', onclick: () => { exportDemands(range); } }, '导出需求台账')
   ]);
   paint();
   wrap.appendChild(toolBar); wrap.appendChild(tabsBar); wrap.appendChild(body);
@@ -1392,7 +1674,7 @@ function pageAdmin() {
   if (!isAdmin()) return emptyNode('仅管理员可访问此页面', '🔒');
   const wrap = h('div');
   let tab = 'store';
-  const tabsBar = h('div', { class: 'tabs m2-keep' });
+  const tabsBar = h('div', { class: 'tabs chip-tabs m2-keep' });
   const body = h('div');
 
   function paint() {

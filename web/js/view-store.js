@@ -21,7 +21,12 @@ function renderTaskCard(item, opts) {
   const m = item.later
     ? { cls: '', label: (String(t.showFrom || '') + ' 开始'), tag: 'tag-gray', cd: 'cd-normal' }
     : (item.notStarted ? { cls: '', label: '待生效', tag: 'tag-gray', cd: 'cd-normal' } : (STATUS_META[item.status] || STATUS_META.normal));
-  const card = h('div', { class: 'task-card ' + m.cls, dataset: { taskId: t.id || '' } });
+  /* 整卡可点进详情（2026-11-06）：取消底部「详情」按钮 */
+  const card = h('div', {
+    class: 'task-card ' + m.cls, dataset: { taskId: t.id || '' },
+    style: { cursor: 'pointer' },
+    onclick: (ev) => { if (ev.target.closest('a,button,img')) return; openTaskDetail(item, opts); }
+  });
 
   /* 头部 */
   const meta = h('div', { class: 'tc-meta' }, [
@@ -105,7 +110,7 @@ function renderTaskCard(item, opts) {
       btns.appendChild(h('button', { class: 'btn btn-sm btn-primary', onclick: () => openDoneModal(item, opts.onDone) }, '提交完成'));
     }
   }
-  btns.appendChild(h('button', { class: 'btn btn-sm btn-ghost', onclick: () => openTaskDetail(item, opts) }, '详情'));
+  btns.addEventListener('click', (ev) => ev.stopPropagation());
   card.appendChild(h('div', { class: 'tc-foot' }, [footLeft, btns]));
   return card;
 }
@@ -246,7 +251,7 @@ function demandFlowNode(d, opts) {
     const m = meta[i] || {};
     wrap.appendChild(h('div', { class: 'flow-step ' + (s[i] === 3 ? 'rej' : cls) }, [
       h('div', { class: 'fs-row' }, [
-        h('span', { class: 'fs-dot' }, s[i] === 2 ? '✓' : s[i] === 3 ? '×' : String(i + 1)),
+        h('span', { class: 'fs-dot', html: s[i] === 2 ? iconSvg('check', 10) : s[i] === 3 ? iconSvg('x', 10) : String(i + 1) }),
         h('span', { text: label })
       ]),
       opts.showMeta
@@ -294,7 +299,7 @@ function renderDemandCard(d, opts) {
     ]),
     h('div', { class: 'tc-right' }, [
       d.assign ? tagNode('→ ' + d.assign.toName + '（' + d.assign.dept + '）', 'tag-purple')
-        : tagNode('期望：' + (d.targetDept || '不限部门'), 'tag-line'),
+        : h('span', { class: 'expect-txt', text: '期望 ' + (d.targetDept || '不限部门') }),
       canDeleteDemand(d) ? h('button', {
         class: 'btn btn-xs btn-del',
         onclick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); confirmDeleteDemand(d, opts.onDeleted); }
@@ -651,85 +656,128 @@ function pageStoreTasks() {
     statusLabel.style.display = 'none';
     clear(tabsBar);
 
-    const card = h('div', { class: 'flt' });
-
-    /* 第 1 行：周期切换 + 动作 */
-    const segWrap = h('div', { class: 'flt-seg', role: 'tablist' });
-    [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部']].forEach(([k, label]) => {
-      const on = period === k && cycleFilter !== 'once';
-      segWrap.appendChild(h('button', {
-        class: 'seg' + (on ? ' on' : ''), type: 'button', role: 'tab', 'aria-selected': on ? 'true' : 'false',
-        onclick: () => { period = k; cycleFilter = 'all'; filterSet.clear(); paint(); }
-      }, [h('span', { text: label }), h('span', { class: 'n', text: String(periodItems(k).length) })]));
-    });
-    const onceOn = cycleFilter === 'once';
-    segWrap.appendChild(h('button', {
-      class: 'seg' + (onceOn ? ' on' : ''), type: 'button', role: 'tab', 'aria-selected': onceOn ? 'true' : 'false',
-      onclick: () => { cycleFilter = onceOn ? 'all' : 'once'; filterSet.clear(); paint(); }
-    }, [h('span', { text: '专项' }), h('span', { class: 'n', text: String(onceItems().length) })]));
-
-    const anyFilter = creatorSet.size || filterSet.size;
-    const acts = h('div', { class: 'flt-acts' }, [
-      anyFilter ? h('button', {
-        class: 'flt-act', type: 'button', title: '清除全部筛选',
-        onclick: () => { creatorSet.clear(); filterSet.clear(); paint(); }
-      }, [h('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' }), h('span', { text: '清除筛选' })]) : null,
-      h('button', {
-        class: 'flt-act', type: 'button', title: '刷新',
-        onclick: () => { paint(); toast('已刷新'); }
-      }, [h('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>' }), h('span', { text: '刷新' })])
-    ]);
-    card.appendChild(h('div', { class: 'flt-row seg-row' }, [
-      h('span', { class: 'flt-k', text: '周期' }), segWrap, acts
-    ]));
-
-    /* 第 2 行：发布人 */
-    const opts = creatorOptions();
-    const cChips = h('div', { class: 'chips' });
-    if (opts.length) {
-      opts.forEach(o => {
-        const on = creatorSet.has(o.v);
-        cChips.appendChild(h('button', {
-          class: 'chip' + (on ? ' on' : ''), type: 'button',
-          onclick: () => { on ? creatorSet.delete(o.v) : creatorSet.add(o.v); paint(); }
-        }, [
-          h('span', { class: 'ck', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' }),
-          h('span', { text: o.t })
-        ]));
-      });
-    } else {
-      cChips.appendChild(h('span', { class: 'fhint', text: '暂无任务' }));
-    }
-    card.appendChild(h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: '发布人' }), cChips]));
-
-    /* 第 3 行：状态 */
+    /* 与总部同一套：状态=底板页签，周期/发布人=矩形标签 */
     const base = baseItems();
     const doneN = base.filter(x => x.status === 'done' || x.status === 'late').length;
     const overdueN = base.filter(x => x.status === 'overdue').length;
     const dueN = base.filter(x => x.status === 'due').length;
-    const defs = [
-      ['unfinished', '未完成', base.length - doneN],
-      ['due', '即将到期', dueN],
-      ['overdue', '已逾期', overdueN],
-      ['finished', '已完成', doneN]
-    ];
-    const chk = () => h('span', { class: 'ck', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' });
-    const sChips = h('div', { class: 'chips' });
-    const allOn = filterSet.size === 0;
-    sChips.appendChild(h('button', {
-      class: 'chip' + (allOn ? ' on' : ''), type: 'button',
-      onclick: () => { filterSet.clear(); paint(); }
-    }, [chk(), h('span', { text: '全部状态' }), h('span', { class: 'n', text: String(base.length) })]));
-    defs.forEach(([k, label, n]) => {
-      const on = filterSet.has(k);
-      sChips.appendChild(h('button', {
-        class: 'chip' + (on ? ' on' : ''), type: 'button',
-        onclick: () => { on ? filterSet.delete(k) : filterSet.add(k); paint(); }
-      }, [chk(), h('span', { text: label }), h('span', { class: 'n', text: String(n) })]));
-    });
-    card.appendChild(h('div', { class: 'flt-row' }, [h('span', { class: 'flt-k', text: '状态' }), sChips]));
 
-    filterBar.appendChild(card);
+    const bar = h('div', { class: 'flt-bar' });
+
+    /* 状态 */
+    const segTabs = h('div', { class: 'tabs chip-tabs seg-track' });
+    segTabs.appendChild(h('div', {
+      class: 'tab' + (filterSet.size === 0 ? ' active' : ''),
+      onclick: () => { filterSet.clear(); paint(); }
+    }, [h('span', { text: '全部状态' }), h('span', { class: 'cnt' }, String(base.length))]));
+    [['unfinished', '未完成', base.length - doneN],
+     ['due', '即将到期', dueN],
+     ['overdue', '已逾期', overdueN],
+     ['finished', '已完成', doneN]].forEach(([k, label, n]) => {
+      segTabs.appendChild(h('div', {
+        class: 'tab' + (filterSet.has(k) ? ' active' : ''),
+        onclick: () => { filterSet.has(k) ? filterSet.delete(k) : filterSet.add(k); paint(); }
+      }, [h('span', { text: label }), h('span', { class: 'cnt' }, String(n))]));
+    });
+    bar.appendChild(h('div', { class: 'flt-group flt-seg' }, [
+      h('span', { class: 'flt-gl', text: '状态' }), segTabs
+    ]));
+
+
+    /* 周期 */
+    const cycWrap = h('div', { class: 'cf-wrap' });
+    [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部']].forEach(([k, label]) => {
+      const on = period === k && cycleFilter !== 'once';
+      cycWrap.appendChild(h('button', {
+        class: 'cf-chip' + (on ? ' on' : ''), type: 'button',
+        onclick: () => { period = k; cycleFilter = 'all'; filterSet.clear(); paint(); }
+      }, [h('span', { text: label }), h('span', { class: 'cf-n', text: String(periodItems(k).length) })]));
+    });
+    const onceOn = cycleFilter === 'once';
+    cycWrap.appendChild(h('button', {
+      class: 'cf-chip' + (onceOn ? ' on' : ''), type: 'button',
+      onclick: () => { cycleFilter = onceOn ? 'all' : 'once'; filterSet.clear(); paint(); }
+    }, [h('span', { text: '专项' }), h('span', { class: 'cf-n', text: String(onceItems().length) })]));
+    bar.appendChild(h('div', { class: 'flt-group' }, [
+      h('span', { class: 'flt-gl', text: '周期' }), cycWrap
+    ]));
+
+
+    /* 发布人：标签 + 更多折叠 */
+    const opts = creatorOptions();
+    /* 只显示人名（部门放 title），最多 3 个，其余进「更多」——保证三组能排成一排 */
+    const cWrap = opts.length
+      ? chipFilterWithMore({
+        label: '发布人', max: 3,
+        options: opts.map(o => ({ v: o.v, t: String(o.t).replace(/（.*?）/g, '').trim(), n: undefined })),
+        selected: creatorSet, onChange: () => paint()
+      }).el
+      : h('span', { class: 'flt-hint', text: '暂无任务' });
+    bar.appendChild(h('div', { class: 'flt-group' }, [
+      h('span', { class: 'flt-gl', text: '发布人' }), cWrap
+    ]));
+
+    /* 手机端：三颗药丸 + 底部弹层（与总部一致） */
+    function buildMobileFilters() {
+      const stText = filterSet.size === 0 ? '全部'
+        : filterSet.size === 1 ? ({ unfinished: '未完成', due: '即将到期', overdue: '已逾期', finished: '已完成' }[Array.from(filterSet)[0]] || '已选')
+          : '已选 ' + filterSet.size + ' 项';
+      const cycText = cycleFilter === 'once' ? '专项' : ({ today: '今日', week: '本周', month: '本月', all: '全部' }[period] || '今日');
+      const cText = creatorSet.size === 0 ? '全部'
+        : creatorSet.size === 1 ? String(Array.from(creatorSet)[0] ? creatorOptions().find(o => o.v === Array.from(creatorSet)[0])?.t || '1 人' : '1 人').replace(/（.*?）/g, '')
+          : '已选 ' + creatorSet.size + ' 人';
+      return h('div', { class: 'mf-bar' }, [
+        filterPill({
+          label: '状态', value: stText, active: filterSet.size > 0, count: filterSet.size || '',
+          onClick: () => openFilterSheet({
+            title: '任务状态', multi: true,
+            options: [['unfinished', '未完成', base.length - doneN], ['due', '即将到期', dueN],
+                      ['overdue', '已逾期', overdueN], ['finished', '已完成', doneN]]
+              .map(([k, t, n]) => ({ v: k, t: t, n: n })),
+            selected: filterSet, onChange: () => paint()
+          })
+        }),
+        filterPill({
+          label: '周期', value: cycText, active: cycleFilter === 'once' || period !== 'today',
+          onClick: () => {
+            const cur = new Set([cycleFilter === 'once' ? 'once' : period]);
+            openFilterSheet({
+              title: '周期', multi: false,
+              options: [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部'], ['once', '专项']]
+                .map(([k, t]) => ({ v: k, t: t })),
+              selected: cur,
+              onChange: () => {
+                const one = Array.from(cur)[0];
+                if (one === 'once') { cycleFilter = 'once'; }
+                else { cycleFilter = 'all'; period = one || 'today'; }
+                filterSet.clear(); paint();
+              }
+            });
+          }
+        }),
+        filterPill({
+          label: '发布人', value: cText, active: creatorSet.size > 0, count: creatorSet.size || '',
+          onClick: () => openFilterSheet({
+            title: '发布人', multi: true,
+            options: creatorOptions().map(o => ({ v: o.v, t: o.t })),
+            selected: creatorSet, onChange: () => paint()
+          })
+        })
+      ]);
+    }
+
+    if (M2()) filterBar.appendChild(buildMobileFilters());
+    else filterBar.appendChild(bar);
+
+    /* 页面级操作进顶栏（清除筛选只在有筛选时出现） */
+    const anyFilter2 = creatorSet.size || filterSet.size;
+    setPageActions([
+      anyFilter2 ? h('button', {
+        class: 'btn btn-sm btn-ghost',
+        onclick: () => { creatorSet.clear(); filterSet.clear(); paint(); }
+      }, '清除筛选') : null
+    ]);
+
 
     const items = data();
     clear(listBox);
@@ -876,7 +924,7 @@ function pageMyDemands() {
   const wrap = h('div');
   const groupSet = new Set();   // 状态多选（空 = 全部）
   const statBox = h('div');
-  const tabsBar = h('div', { class: 'tabs' });
+  const tabsBar = h('div', { class: 'tabs chip-tabs seg-track' });
   const listBox = h('div');
   const GROUP = {
     pending: d => d.status === 'pending',
@@ -893,11 +941,21 @@ function pageMyDemands() {
     const allMine = state.demands.filter(d => !d.deletedAt && d.storeId === me.id);
     const mine = allMine.filter(d => groupSet.has('archived') ? !!d.archivedAt : !d.archivedAt);
     clear(statBox);
-    statBox.appendChild(statRow(4, [
-      statNode(String(mine.length), '累计提交需求'),
-      statNode(String(mine.filter(GROUP.pending).length), '待管委会评估', 'info'),
-      statNode(String(mine.filter(GROUP.doing).length), '处理中', 'warn'),
-      statNode(String(mine.filter(GROUP.done).length), '已解决归档', 'ok')
+    const fig = (val, label) => h('div', { class: 'kpi' }, [
+      h('div', { class: 'kpi-v', text: String(val) }),
+      h('div', { class: 'kpi-l', text: label })
+    ]);
+    const LD = {
+      all: M2() ? '累计提交' : '累计提交需求',
+      pending: M2() ? '待评估' : '待管委会评估',
+      doing: '处理中',
+      done: M2() ? '已解决' : '已解决归档'
+    };
+    statBox.appendChild(h('div', { class: 'kpi-strip' }, [
+      fig(mine.length, LD.all),
+      fig(mine.filter(GROUP.pending).length, LD.pending),
+      fig(mine.filter(GROUP.doing).length, LD.doing),
+      fig(mine.filter(GROUP.done).length, LD.done)
     ]));
     clear(tabsBar);
     tabsBar.appendChild(h('div', {
@@ -922,11 +980,30 @@ function pageMyDemands() {
       listBox.appendChild(l);
     }
   }
-  const toolBar = h('div', { class: 'row', style: { marginBottom: '12px' } }, [
-    h('button', { class: 'btn btn-primary', style: { marginLeft: 'auto' }, onclick: () => openNewDemandModal(paint) }, '+ 提交新需求')
+  setPageActions([
+    h('button', { class: 'btn btn-sm btn-primary', onclick: () => openNewDemandModal(paint) }, '+ 提交新需求')
   ]);
   paint();
-  wrap.appendChild(toolBar); wrap.appendChild(statBox); wrap.appendChild(tabsBar); wrap.appendChild(listBox);
+  if (M2()) {
+    wrap.appendChild(h('div', { class: 'mf-bar' }, [
+      filterPill({
+        label: '状态', value: groupSet.size === 0 ? '全部'
+          : groupSet.size === 1 ? ((GROUP_DEFS.find(g => g[0] === Array.from(groupSet)[0]) || [0, '已选'])[1])
+            : '已选 ' + groupSet.size + ' 项',
+        active: groupSet.size > 0, count: groupSet.size || '',
+        onClick: () => openFilterSheet({
+          title: '需求状态', multi: true,
+          options: GROUP_DEFS.map(([k, t]) => ({ v: k, t: t })),
+          selected: groupSet, onChange: () => paint()
+        })
+      })
+    ]));
+  } else {
+    wrap.appendChild(h('div', { class: 'flt-bar' }, [
+      h('div', { class: 'flt-group flt-seg' }, [h('span', { class: 'flt-gl', text: '状态' }), tabsBar])
+    ]));
+  }
+  wrap.appendChild(statBox); wrap.appendChild(listBox);
   return wrap;
 }
 

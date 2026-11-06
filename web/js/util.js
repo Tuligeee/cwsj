@@ -209,4 +209,8 @@ function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   localStorage.setItem(THEME_KEY, t);
 }
-function initTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
+/* 夜间模式已下线（2026-11-06）：统一亮色，清掉历史深色偏好，后续完善再启用 */
+function initTheme() {
+  document.documentElement.setAttribute('data-theme', 'light');
+  try { localStorage.removeItem(THEME_KEY); } catch (e) { }
+}

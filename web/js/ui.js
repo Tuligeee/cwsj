@@ -65,6 +65,320 @@ function confirmDialog(opt) {
 }
 
 /* ---------------- 基础片段 ---------------- */
+
+/* ---------------- 图标集（lucide 路径，1.5 stroke）---------------- */
+const ICON_PATHS = {
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  checklist: '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  chart: '<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="13" y="8" width="3" height="10"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  dot: '',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/>'
+};
+function iconSvg(name, size) {
+  const p = ICON_PATHS[name] || '';
+  const s = size || 18;
+  return '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor"'
+    + ' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
+}
+
+
+/* 下拉式多选筛选（2026-11-05）：选项再多也只占一个按钮
+   cfg = { label, options: [{v,t,n}], selected: Set, onChange() } */
+function multiSelectFilter(cfg) {
+  const label = cfg.label;
+  const opts = () => (typeof cfg.options === 'function' ? cfg.options() : (cfg.options || []));
+  let open = false, pop = null, query = '';
+
+  const txt = h('span', { class: 'msel-t' });
+  const cnt = h('span', { class: 'msel-n' });
+  const btn = h('button', {
+    class: 'msel-btn', type: 'button', 'aria-haspopup': 'listbox',
+    onclick: (e) => { e.stopPropagation(); toggle(); }
+  }, [txt, cnt, h('span', { class: 'msel-car', html: iconSvg('chevron', 12) })]);
+
+  function labelText() {
+    const sel = cfg.selected;
+    const list = opts();
+    if (!sel || sel.size === 0) return label;
+    if (sel.size === 1) {
+      const one = list.find(o => sel.has(o.v));
+      return label + ' · ' + (one ? one.t : '1 项');
+    }
+    return label;
+  }
+  function refresh() {
+    txt.textContent = labelText();
+    cnt.textContent = cfg.selected && cfg.selected.size ? String(cfg.selected.size) : '';
+    cnt.style.display = cnt.textContent ? 'inline-flex' : 'none';
+    btn.classList.toggle('on', !!(cfg.selected && cfg.selected.size));
+  }
+
+  function paintPop() {
+    const list = opts().filter(o => !query || String(o.t).toLowerCase().indexOf(query.toLowerCase()) >= 0);
+    const rows = h('div', { class: 'msel-list' });
+    if (!list.length) rows.appendChild(h('div', { class: 'msel-empty', text: '没有匹配的选项' }));
+    list.forEach(o => {
+      const on = cfg.selected.has(o.v);
+      rows.appendChild(h('button', {
+        class: 'msel-opt' + (on ? ' on' : ''), type: 'button', role: 'option', 'aria-selected': on ? 'true' : 'false',
+        onclick: (e) => {
+          e.stopPropagation();
+          on ? cfg.selected.delete(o.v) : cfg.selected.add(o.v);
+          refresh(); paintPop(); cfg.onChange && cfg.onChange();
+        }
+      }, [
+        h('span', { class: 'msel-ck', html: on ? iconSvg('check', 12) : '' }),
+        h('span', { class: 'msel-o', text: o.t }),
+        h('span', { class: 'msel-c', text: o.n === undefined ? '' : String(o.n) })
+      ]));
+    });
+    const body = h('div', { class: 'msel-body' }, [rows]);
+    if (list.length > 8 || query) {
+      // 搜索只在选项多时出现，避免小集合多一个控件
+    }
+    return body;
+  }
+
+  function openPop() {
+    const list = opts();
+    const popBox = h('div', { class: 'msel-pop' });
+    if (list.length > 8) {
+      popBox.appendChild(h('input', {
+        class: 'msel-search', type: 'text', placeholder: '搜索' + label,
+        oninput: (e) => { query = e.target.value.trim(); popBox.querySelector('.msel-body').replaceWith(paintPop()); }
+      }));
+    }
+    popBox.appendChild(paintPop());
+    const foot = h('div', { class: 'msel-foot' }, [
+      h('button', {
+        class: 'msel-act', type: 'button',
+        onclick: (e) => { e.stopPropagation(); cfg.selected.clear(); refresh(); popBox.querySelector('.msel-body').replaceWith(paintPop()); cfg.onChange && cfg.onChange(); }
+      }, '清空'),
+      h('button', {
+        class: 'msel-act msel-act-primary', type: 'button',
+        onclick: (e) => { e.stopPropagation(); closePop(); }
+      }, '完成')
+    ]);
+    popBox.appendChild(foot);
+    const r = btn.getBoundingClientRect();
+    popBox.style.top = (r.bottom + 6) + 'px';
+    popBox.style.left = Math.min(r.left, window.innerWidth - 280) + 'px';
+    document.body.appendChild(popBox);
+    pop = popBox;
+    open = true;
+    document.addEventListener('click', outside);
+    document.addEventListener('keydown', esc);
+  }
+  function closePop() {
+    if (pop) pop.remove();
+    pop = null; open = false; query = '';
+    document.removeEventListener('click', outside);
+    document.removeEventListener('keydown', esc);
+  }
+  function toggle() { open ? closePop() : openPop(); }
+  function outside(e) { if (pop && !pop.contains(e.target) && !btn.contains(e.target)) closePop(); }
+  function esc(e) { if (e.key === 'Escape') closePop(); }
+
+  refresh();
+  return { el: btn, refresh: refresh };
+}
+
+
+/* 平铺胶囊 + 溢出折叠（2026-11-05 方案 A）
+   选中的永远排最前且一定可见；超出的收进「更多 +N」，点开是带搜索的完整列表。
+   cfg = { label, options: [{v,t,n}] | fn, selected: Set, onChange(), max } */
+function chipFilterWithMore(cfg) {
+  const BOX = h('span', { class: 'cf-wrap' });
+  const moreBtn = h('button', { class: 'cf-more', type: 'button' });
+
+  const opts = () => (typeof cfg.options === 'function' ? cfg.options() : (cfg.options || []));
+  const max = cfg.max || 6;
+
+  function refresh() {
+    const list = opts();
+    const sel = cfg.selected || new Set();
+    const picked = list.filter(o => sel.has(o.v));
+    const rest = list.filter(o => !sel.has(o.v));
+    const room = Math.max(0, max - picked.length);
+    const shown = picked.concat(rest.slice(0, room));
+    const hidden = rest.slice(room);
+
+    clear(BOX);
+    shown.forEach(o => {
+      const on = sel.has(o.v);
+      BOX.appendChild(h('button', {
+        class: 'cf-chip' + (on ? ' on' : ''), type: 'button',
+        title: o.t,
+        onclick: () => { on ? sel.delete(o.v) : sel.add(o.v); refresh(); cfg.onChange && cfg.onChange(); }
+      }, [
+        h('span', { text: o.t }),
+        o.n === undefined ? null : h('span', { class: 'cf-n', text: String(o.n) }),
+        on ? h('span', { class: 'cf-x', html: iconSvg('check', 10) }) : null
+      ]));
+    });
+
+    BOX.appendChild(moreBtn);   /* clear(BOX) 会把它一起清掉，这里必须挂回来 */
+    if (hidden.length) {
+      moreBtn.style.display = 'inline-flex';
+      moreBtn.innerHTML = '';
+      moreBtn.appendChild(h('span', { text: '更多' }));
+      moreBtn.appendChild(h('span', { class: 'cf-n', text: '+' + hidden.length }));
+      moreBtn.appendChild(h('span', { class: 'cf-car', html: iconSvg('chevron', 11) }));
+      moreBtn.onclick = (e) => {
+        e.stopPropagation();
+        openMultiPop({
+          label: cfg.label, options: list, selected: sel,
+          onChange: () => { refresh(); cfg.onChange && cfg.onChange(); }
+        }, moreBtn);
+      };
+    } else {
+      moreBtn.style.display = 'none';
+    }
+  }
+
+  refresh();
+  return { el: BOX, refresh: refresh };
+}
+
+/* 通用多选弹层（带搜索 + 全选/清空） */
+function openMultiPop(cfg, anchor) {
+  const old = document.querySelector('.msel-pop');
+  if (old) old.remove();
+  let query = '';
+  const pop = h('div', { class: 'msel-pop' });
+
+  function listNode() {
+    const rows = h('div', { class: 'msel-list' });
+    const list = (cfg.options || []).filter(o => !query || String(o.t).toLowerCase().indexOf(query.toLowerCase()) >= 0);
+    if (!list.length) rows.appendChild(h('div', { class: 'msel-empty', text: '没有匹配的选项' }));
+    list.forEach(o => {
+      const on = cfg.selected.has(o.v);
+      rows.appendChild(h('button', {
+        class: 'msel-opt' + (on ? ' on' : ''), type: 'button',
+        onclick: (e) => {
+          e.stopPropagation();
+          on ? cfg.selected.delete(o.v) : cfg.selected.add(o.v);
+          cfg.onChange && cfg.onChange();
+          body.replaceChild(listNode(), body.firstChild);
+        }
+      }, [
+        h('span', { class: 'msel-ck', html: on ? iconSvg('check', 12) : '' }),
+        h('span', { class: 'msel-o', text: o.t }),
+        h('span', { class: 'msel-c', text: o.n === undefined ? '' : String(o.n) })
+      ]));
+    });
+    return rows;
+  }
+
+  const body = h('div', { class: 'msel-body' }, [listNode()]);
+  const many = (cfg.options || []).length > 8;
+  if (many) {
+    pop.appendChild(h('input', {
+      class: 'msel-search', type: 'text', placeholder: '搜索' + cfg.label,
+      oninput: (e) => { query = e.target.value.trim(); body.replaceChild(listNode(), body.firstChild); }
+    }));
+  }
+  pop.appendChild(body);
+  pop.appendChild(h('div', { class: 'msel-foot' }, [
+    h('button', { class: 'msel-act', type: 'button', onclick: () => { cfg.selected.clear(); cfg.onChange && cfg.onChange(); body.replaceChild(listNode(), body.firstChild); } }, '清空'),
+    h('button', { class: 'msel-act msel-act-primary', type: 'button', onclick: () => close() }, '完成')
+  ]));
+
+  /* 弹层是 fixed 定位：必须跟着锚点走，滚出视口就关掉（2026-11-06） */
+  function place() {
+    const r = anchor.getBoundingClientRect();
+    if (r.bottom < 8 || r.top > window.innerHeight - 8) { close(); return; }
+    pop.style.top = (r.bottom + 6) + 'px';
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 264)) + 'px';
+  }
+  place();
+  document.body.appendChild(pop);
+
+  function onScroll() { place(); }
+  function close() {
+    pop.remove();
+    document.removeEventListener('click', out);
+    document.removeEventListener('keydown', esc);
+    document.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', onScroll);
+  }
+  function out(e) { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); }
+  function esc(e) { if (e.key === 'Escape') close(); }
+  setTimeout(() => document.addEventListener('click', out), 0);
+  document.addEventListener('keydown', esc);
+  document.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', onScroll);
+}
+
+
+/* 手机端筛选药丸（2026-11-06）：横排只显示"当前选了什么"，选项进底部弹层 */
+function filterPill(cfg) {
+  /* cfg = { label, value, active, count, onClick } */
+  return h('button', {
+    class: 'mf-pill' + (cfg.active ? ' on' : ''),
+    type: 'button', 'aria-haspopup': 'dialog',
+    onclick: cfg.onClick
+  }, [
+    h('span', { class: 'mf-k', text: cfg.label }),
+    h('span', { class: 'mf-v', text: cfg.value || '全部' }),
+    cfg.count ? h('span', { class: 'mf-n', text: String(cfg.count) }) : null,
+    h('span', { class: 'mf-c', html: iconSvg('chevron', 12) })
+  ]);
+}
+
+/* 底部选项弹层：multi=true 多选（带清空/完成），false 单选（点即生效并关闭） */
+function openFilterSheet(cfg) {
+  const body = h('div', { class: 'mfs' });
+  const paintRows = () => {
+    clear(body);
+    (cfg.options || []).forEach(o => {
+      const on = cfg.selected.has(o.v);
+      body.appendChild(h('button', {
+        class: 'mfs-row' + (on ? ' on' : ''),
+        type: 'button', role: 'option', 'aria-selected': on ? 'true' : 'false',
+        onclick: () => {
+          if (cfg.multi) {
+            on ? cfg.selected.delete(o.v) : cfg.selected.add(o.v);
+            paintRows();
+            cfg.onChange && cfg.onChange();
+          } else {
+            cfg.selected.clear();
+            if (!on) cfg.selected.add(o.v);
+            cfg.onChange && cfg.onChange();
+            closeTopModal();
+          }
+        }
+      }, [
+        h('span', { class: 'mfs-t', text: o.t }),
+        o.n === undefined ? null : h('span', { class: 'mfs-n', text: String(o.n) }),
+        h('span', { class: 'mfs-ck', html: on ? iconSvg('check', 14) : '' })
+      ]));
+    });
+    if (!(cfg.options || []).length) {
+      body.appendChild(h('div', { class: 'mfs-empty', text: '没有可选的选项' }));
+    }
+  };
+  paintRows();
+  openModal({
+    title: cfg.title,
+    sub: cfg.multi ? '可多选' : '单选',
+    body: body,
+    footer: cfg.multi ? [
+      h('button', { class: 'btn', onclick: () => { cfg.selected.clear(); paintRows(); cfg.onChange && cfg.onChange(); } }, '清空'),
+      h('button', { class: 'btn btn-primary', onclick: () => closeTopModal() }, '完成')
+    ] : null
+  });
+}
+
 function tagNode(text, cls) { return h('span', { class: 'tag ' + (cls || 'tag-gray'), text: text }); }
 function starsNode(n, big) {
   const w = h('span', { class: 'stars' + (big ? ' stars-lg' : '') });
@@ -90,15 +404,24 @@ function linksNode(links) {
   links.forEach(l => w.appendChild(h('a', {
     class: 'link-item', href: l.url, target: '_blank', rel: 'noopener',
     onclick: e => { if (/^javascript:/i.test(l.url)) e.preventDefault(); }
-  }, [h('span', {}, '🔗'), h('span', {}, l.title || l.url)])));
+  }, [h('span', { class: 'lk-ico', html: iconSvg('link', 13) }), h('span', {}, l.title || l.url)])));
   return w;
 }
 
 /* ---------------- 统计卡 ---------------- */
-function statNode(num, label, kind) {
+function statNode(num, label, kind, sub) {
   return h('div', { class: 'stat' + (kind ? ' s-' + kind : '') }, [
     h('div', { class: 'stat-num', text: num }),
-    h('div', { class: 'stat-label', text: label })
+    h('div', { class: 'stat-label', text: label }),
+    sub ? h('div', { class: 'stat-sub', text: sub }) : null
+  ]);
+}
+/* 主指标卡：一个大数 + 说明 + 一行小字 */
+function statLead(num, label, sub) {
+  return h('div', { class: 'stat stat-lead' }, [
+    h('div', { class: 'stat-num', text: num }),
+    h('div', { class: 'stat-label', text: label }),
+    sub ? h('div', { class: 'stat-sub', text: sub }) : null
   ]);
 }
 function statRow(cols, items) {
@@ -339,11 +662,12 @@ function linkEditor(links, onChange) {
 }
 
 /* ---------------- 空状态 ---------------- */
-function emptyNode(text, icon) {
-  return h('div', { class: 'empty' }, [
-    h('span', { class: 'eico' }, icon || '🗂'),
-    h('div', { text: text || '暂无数据' })
-  ]);
+function emptyNode(text, icon, iconName) {
+  /* iconName 优先：用线性图标替代 emoji（unslop 第 3 遍） */
+  const ico = iconName
+    ? h('span', { class: 'eico eico-svg', html: iconSvg(iconName, 22) })
+    : h('span', { class: 'eico' }, icon || '');
+  return h('div', { class: 'empty' }, [ico, h('div', { text: text || '暂无数据' })]);
 }
 
 /* ---------------- 时间线 ---------------- */

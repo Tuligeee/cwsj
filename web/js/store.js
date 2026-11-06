@@ -114,7 +114,7 @@ const canEditContacts = () => isCommittee() || isHR();
    任务周期 / 实例
    ========================================================= */
 const CYCLE_LABEL = { daily: '每日必做', weekly: '每周必做', monthly: '每月必做', once: '专项任务' };
-const CYCLE_TAG = { daily: 'tag-blue', weekly: 'tag-purple', monthly: 'tag-yellow', once: 'tag-gray' };
+const CYCLE_TAG = { daily: 'tag-line', weekly: 'tag-line', monthly: 'tag-line', once: 'tag-line' };
 
 /** 该周期的截止时间 */
 function occDue(t, date) {
@@ -374,10 +374,15 @@ function storeCompletion(storeId, days, now) {
 }
 
 /* ---------------- 部门 / 管理公司统计 ---------------- */
-function demandStats(days, now) {
+function demandStats(days, now, until) {
   const nowD = now ? new Date(now) : new Date();
   const from = addDays(startOfDay(nowD), -(days - 1)).getTime();
-  const list = visibleDemands().filter(d => new Date(d.createdAt).getTime() >= from);
+  /* until：区间上界（含当天），不传 = 不限制 */
+  const to = until ? new Date(new Date(until).getFullYear(), new Date(until).getMonth(), new Date(until).getDate(), 23, 59, 59, 999).getTime() : Infinity;
+  const list = visibleDemands().filter(d => {
+    const t = new Date(d.createdAt).getTime();
+    return t >= from && t <= to;
+  });
   const c = { total: list.length, pending: 0, approved: 0, assigned: 0, completed: 0, confirmed: 0, rejected: 0 };
   list.forEach(d => { c[d.status] = (c[d.status] || 0) + 1; });
 
@@ -458,13 +463,15 @@ function demandStats(days, now) {
 }
 
 /** 管理公司发布任务统计（按部门） */
-function taskPublishStats(days, now) {
+function taskPublishStats(days, now, until) {
   const nowD = now ? new Date(now) : new Date();
   const from = addDays(startOfDay(nowD), -(days - 1)).getTime();
+  const to = until ? new Date(new Date(until).getFullYear(), new Date(until).getMonth(), new Date(until).getDate(), 23, 59, 59, 999).getTime() : Infinity;
   const byDept = {};
   state.departments.forEach(x => { byDept[x] = { dept: x, tasks: 0, covers: 0, done: 0, expected: 0, overdue: 0, dueSoon: 0, open: 0 }; });
   state.tasks.forEach(t => {
-    if (new Date(t.createdAt).getTime() < from) return;
+    const created = new Date(t.createdAt).getTime();
+    if (created < from || created > to) return;
     const b = byDept[t.dept]; if (!b) return;
     b.tasks++;
     const p = taskProgress(t, nowD);
