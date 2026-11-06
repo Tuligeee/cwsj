@@ -19,15 +19,16 @@ const ROUTES = {
     { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', iconKey: 'more' }] : [] }
   ],
   hq: [
-    {
-      g: '门店协同', items: [
-        { id: 'hq-demands', label: '门店提需', iconKey: 'inbox' }
-      ]
-    },
+    /* 任务在前、门店提需在后（2026-11-06 调整顺序） */
     {
       g: '任务管理', items: [
         { id: 'hq-tasks', label: '任务管理', iconKey: 'checklist' },
         { id: 'hq-board', label: '任务督办看板', iconKey: 'board' }
+      ]
+    },
+    {
+      g: '门店协同', items: [
+        { id: 'hq-demands', label: '门店提需', iconKey: 'inbox' }
       ]
     },
     {
@@ -87,7 +88,8 @@ function renderApp() {
   $('#login-view').classList.add('hidden');
   renderSideFoot();
   renderUserChip();
-  go(currentRoute || (isStore() ? 'tasks' : 'hq-demands'), true);
+  /* 刷新后统一落在「任务管理」（门店端落「我的任务」），不再从门店提需进 */
+  go(currentRoute || (isStore() ? 'tasks' : 'hq-tasks'), true);
 }
 function renderSideFoot() {
   const f = $('#side-foot');
@@ -206,9 +208,22 @@ function refreshNav() { go(currentRoute, true); }
 
 /* ---------------- 操作日志 ---------------- */
 var AUDIT_LABEL = {
-  'login.ok': '登录', 'login.fail': '登录失败', 'state.save': '保存数据', 'state.deny': '保存被拒',
-  'demand.delete': '删除需求', 'demand.delete.deny': '删除需求被拒',
-  'demand.harddelete.deny': '物理删除被拒', 'img.upload': '上传图片'
+  'login.ok': '登录成功', 'login.fail': '登录失败', 'pwd.change': '修改密码',
+  'state.save': '保存数据', 'state.deny': '保存被拒',
+  'record.submit': '提交完成', 'record.revoke': '撤销提交', 'img.upload': '上传图片',
+  'task.upsert': '新建/修改任务', 'task.patch': '调整任务', 'task.delete': '删除任务',
+  'task.stop': '停止任务', 'task.resume': '恢复任务', 'import.commit': '批量导入任务',
+  'demand.upsert': '提交需求', 'demand.review': '评估需求', 'demand.review.deny': '评估被拒',
+  'demand.assign': '派发需求', 'demand.complete': '完成需求', 'demand.confirm': '门店确认',
+  'demand.archive': '归档需求', 'demand.reopen': '退回重做', 'demand.delete': '删除需求',
+  'demand.delete.deny': '删除需求被拒', 'demand.harddelete.deny': '物理删除被拒',
+  'demand.confirm.deny': '确认被拒', 'demand.complete.deny': '完成被拒', 'demand.archive.deny': '归档被拒',
+  'contact.upsert': '保存联系人', 'contact.patch': '修改联系人', 'contact.delete': '删除联系人',
+  'admin.store.create': '新建门店', 'admin.store.update': '修改门店', 'admin.store.delete': '删除门店',
+  'admin.hq.create': '新建人员账号', 'admin.hq.update': '修改人员账号', 'admin.hq.delete': '删除人员账号',
+  'admin.pwd.reset': '重置密码',
+  'ding.bind': '绑定钉钉', 'ding.test': '测试钉钉提醒',
+  'snapshot.create': '创建快照', 'snapshot.restore': '恢复快照', 'change.restore': '回退改动'
 };
 function openAuditLog() {
   var box = h('div', { class: 'audit-list' });
@@ -217,7 +232,7 @@ function openAuditLog() {
     title: '操作日志', sub: '最近 50 条', body: box,
     footer: [h('button', { class: 'btn', onclick: function () { inst.close(); } }, '关闭')]
   });
-  fetch('/cwsj/api/audit?limit=50', { headers: { Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') } })
+  fetch(apiUrl('/api/audit?limit=50'), { headers: { Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') } })
     .then(function (r) { return r.json(); })
     .then(function (r) {
       clear(box);

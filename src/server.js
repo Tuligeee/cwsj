@@ -466,7 +466,11 @@ require('./inbox').register(app, requireAuth);
 /* ---------------- 操作日志（仅管理员） ---------------- */
 app.get('/api/audit', requireAuth, (req, res) => {
   if (!req.actor.isAdmin) return res.status(403).json({ ok: false, code: 'FORBIDDEN', msg: '只有管理员可以查看操作日志' });
-  const r = listAudit(req.query.limit, req.query.offset);
+  const r = listAudit(req.query.limit, req.query.offset, {
+    from: req.query.from || '', to: req.query.to || '',
+    user: req.query.user || '', q: req.query.q || '',
+    actions: req.query.actions ? String(req.query.actions).split(',').filter(Boolean) : [],
+  });
   res.json({ ok: true, total: r.total, rows: r.rows });
 });
 

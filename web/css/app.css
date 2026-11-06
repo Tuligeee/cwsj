@@ -1823,3 +1823,337 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   .board-page .matrix tbody tr{height:auto;}
   .board-page .matrix tbody td{vertical-align:middle;}
 }
+
+/* ============ 通讯录：部门分组卡片（回退版 2026-11-06） ============ */
+.ct-bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+.ct-search{
+  display:flex;align-items:center;gap:8px;width:288px;max-width:100%;height:34px;
+  padding:0 10px 0 11px;background:#FBFCFE;
+  border:1px solid var(--line);border-radius:10px;
+  transition:border-color .12s var(--ease),background-color .12s var(--ease),box-shadow .12s var(--ease);
+}
+.ct-search:hover{border-color:#C9D3E6;}
+.ct-search:focus-within{background:#fff;border-color:rgba(61,87,214,.42);
+  box-shadow:0 0 0 3px rgba(61,87,214,.10);}
+.ct-search-ic{display:inline-flex;color:var(--text-3);flex:0 0 auto;}
+.ct-search:focus-within .ct-search-ic{color:var(--brand);}
+.ct-search input,
+.ct-search input.input,
+.ct-search input.input:hover,
+.ct-search input.input:focus{
+  flex:1 1 auto;min-width:0;height:auto;padding:0;margin:0;
+  border:0;border-radius:0;background:transparent;
+  font-size:13px;color:var(--text);outline:none;box-shadow:none;
+}
+.ct-search input::placeholder{color:var(--text-3);}
+.ct-search-x{
+  display:none;flex:0 0 auto;align-items:center;justify-content:center;
+  width:18px;height:18px;padding:0;border:0;border-radius:5px;
+  background:var(--panel-3);color:var(--text-3);cursor:pointer;
+}
+.ct-search-x:hover{background:#DDE4F0;color:var(--text-2);}
+.ct-search-x.on{display:inline-flex;}
+.ct-chips{display:flex;align-items:center;gap:6px;}
+
+.ct-sec{margin-bottom:26px;}
+.ct-sec-head{display:flex;align-items:center;gap:10px;padding:0 2px 10px;}
+.ct-sec-t{margin:0;font-size:13px;font-weight:600;color:var(--text);}
+.ct-sec-n{font-size:11.5px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.ct-sec-head::after{content:'';flex:1 1 auto;height:1px;background:var(--line);}
+
+.ct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:10px;}
+
+.ct-card{
+  display:flex;flex-direction:column;gap:8px;
+  padding:12px 14px;background:var(--panel);
+  border:1px solid var(--line);border-radius:11px;
+  transition:border-color .12s var(--ease),background-color .12s var(--ease);
+}
+.ct-card:hover{border-color:rgba(61,87,214,.35);background:#FCFDFF;}
+
+.ct-card-top{display:flex;align-items:flex-start;gap:11px;min-width:0;}
+.ct-av{
+  flex:0 0 auto;width:32px;height:32px;border-radius:8px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:var(--panel-3);color:var(--text-2);font-size:14px;font-weight:600;
+}
+.ct-idtx{flex:1 1 auto;min-width:0;}
+.ct-name{display:flex;align-items:baseline;gap:7px;font-size:14px;font-weight:600;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ct-title{font-size:11px;font-weight:400;color:var(--text-3);}
+.ct-sub{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-3);margin-top:3px;
+  white-space:nowrap;overflow:hidden;}
+.ct-sub-t{overflow:hidden;text-overflow:ellipsis;min-width:0;}
+
+.ct-phone{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:transparent;
+  font-size:11.5px;color:var(--text-2);font-variant-numeric:tabular-nums;cursor:pointer;flex:0 0 auto;}
+.ct-phone:hover{color:var(--brand);}
+.ct-phone-ic{display:inline-flex;color:var(--text-3);}
+.ct-phone:hover .ct-phone-ic{color:var(--brand);}
+.ct-dot{color:var(--line-strong, #C9D2E0);}
+
+.ct-edit{opacity:0;transition:opacity .12s var(--ease);flex:0 0 auto;}
+.ct-card:hover .ct-edit,.ct-card:focus-within .ct-edit{opacity:1;}
+
+.ct-duty{font-size:12px;line-height:1.5;color:var(--text-2);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+
+@media (max-width:720px){
+  .ct-bar{gap:10px;margin-bottom:14px;}
+  .ct-search{width:100%;}
+  .ct-grid{grid-template-columns:1fr;gap:10px;}
+  .ct-card{padding:12px 14px;}
+  .ct-edit{opacity:1;}
+  .ct-sec{margin-bottom:20px;}
+}
+
+/* ============ 数据统计：结算单式（2026-11-06） ============ */
+.st-rule{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0 14px;}
+.st-rule-k{font-size:11.5px;color:var(--text-3);}
+.st-rule-i{
+  font-size:11.5px;color:var(--text-2);padding:2px 8px;border-radius:6px;
+  background:var(--panel-3);font-variant-numeric:tabular-nums;
+}
+
+.st-empty{
+  display:flex;align-items:center;gap:8px;padding:14px 2px;
+  font-size:12.5px;color:var(--text-2);
+}
+.st-empty-ic{display:inline-flex;color:var(--text-3);}
+.st-empty-t{font-weight:500;}
+.st-empty-s{color:var(--text-3);}
+
+/* 构成：一条堆叠条 + 右对齐数字 */
+.st-stack{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--panel-3);margin-bottom:14px;}
+.st-stack-seg{height:100%;transition:width .3s var(--ease);}
+.st-stack-seg.ok{background:var(--ok);}
+.st-stack-seg.warn{background:var(--warn);}
+.st-stack-seg.bad{background:var(--danger);}
+.st-stack-rows{display:flex;flex-direction:column;gap:8px;}
+.st-srow{display:grid;grid-template-columns:8px 1fr auto 56px;align-items:center;gap:10px;font-size:12.5px;}
+.st-sw{width:8px;height:8px;border-radius:2px;}
+.st-sw.ok{background:var(--ok);}
+.st-sw.warn{background:var(--warn);}
+.st-sw.bad{background:var(--danger);}
+.st-sk{color:var(--text-2);}
+.st-sv{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
+.st-sp{color:var(--text-3);text-align:right;font-variant-numeric:tabular-nums;}
+
+/* 各周期：名称 / 细条 / 分数 / 百分比 */
+.st-cyc{display:grid;grid-template-columns:88px 1fr 62px 52px;align-items:center;gap:12px;padding:7px 0;}
+.st-cyc + .st-cyc{border-top:1px solid var(--line-2);}
+.st-cyc-k{font-size:12.5px;color:var(--text-2);}
+.st-cyc-bar{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;}
+.st-cyc-fill{display:block;height:100%;border-radius:3px;background:var(--brand);transition:width .3s var(--ease);}
+.st-cyc-fill.zero{background:transparent;}
+.st-cyc-v{font-size:12px;color:var(--text-3);text-align:right;font-variant-numeric:tabular-nums;}
+.st-cyc-p{font-size:12.5px;color:var(--text);font-weight:600;text-align:right;font-variant-numeric:tabular-nums;}
+
+/* 明细表 */
+.st-th-rank{width:56px;}
+.st-rank{color:var(--text-3);font-variant-numeric:tabular-nums;}
+.st-store{font-size:12.5px;color:var(--text);}
+.st-city{font-size:11px;color:var(--text-3);margin-top:1px;}
+.tbl td.num.bad{color:var(--danger-tx);font-weight:600;}
+.st-grade{font-size:12px;}
+.st-grade.pass{color:var(--ok-tx);}
+.st-grade.fail{color:var(--danger-tx);}
+
+@media (max-width:720px){
+  .st-cyc{grid-template-columns:74px 1fr 52px;gap:10px;}
+  .st-cyc-p{display:none;}
+  .st-srow{grid-template-columns:8px 1fr auto;gap:8px;}
+  .st-sp{display:none;}
+}
+
+/* ============ 统计页甜甜圈（2026-11-06） ============ */
+.dh-wrap{position:relative;display:flex;align-items:center;justify-content:center;padding:6px 0 2px;}
+.dh-svg{width:172px;height:172px;overflow:visible;}
+.dh-seg{
+  stroke-linecap:butt;cursor:pointer;
+  transition:stroke-width .16s var(--ease),opacity .16s var(--ease);
+}
+.dh-seg.ok{stroke:var(--ok);}
+.dh-seg.warn{stroke:var(--warn);}
+.dh-seg.bad{stroke:#DE7378;}
+.dh-seg.on{stroke-width:26;}
+.dh-wrap:hover .dh-seg:not(.on){opacity:.55;}
+
+.dh-center{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:none;gap:2px;
+}
+.dh-total{font-size:24px;font-weight:700;color:var(--text);line-height:1;font-variant-numeric:tabular-nums;}
+.dh-label{font-size:11px;color:var(--text-3);}
+
+.dh-tip{
+  position:fixed;z-index:9000;
+  display:none;align-items:center;gap:8px;
+  padding:6px 10px;border-radius:8px;white-space:nowrap;
+  background:var(--panel);border:1px solid var(--line);
+  box-shadow:0 6px 18px rgba(23,28,40,.10);
+  font-size:12px;color:var(--text);pointer-events:none;
+}
+.dh-tip.on{display:inline-flex;}
+.dh-sw{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}
+.dh-sw.ok{background:var(--ok);}
+.dh-sw.warn{background:var(--warn);}
+.dh-sw.bad{background:var(--danger);}
+.dh-k{color:var(--text-2);}
+.dh-v{font-weight:600;font-variant-numeric:tabular-nums;}
+.dh-p{color:var(--text-3);font-variant-numeric:tabular-nums;}
+
+@media (max-width:720px){
+  .dh-svg{width:150px;height:150px;}
+  .dh-total{font-size:20px;}
+}
+
+/* ============ 操作日志（2026-11-06） ============ */
+.al-bar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:12px 14px;margin-bottom:14px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+}
+.al-f{display:flex;align-items:center;gap:8px;min-width:0;}
+.al-f input{height:32px;font-size:12.5px;}
+.al-range{
+  display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 11px;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);
+  font-size:12.5px;color:var(--text);cursor:pointer;
+  font-variant-numeric:tabular-nums;
+  transition:border-color .12s var(--ease),background-color .12s var(--ease);
+}
+.al-range:hover{border-color:#C9D3E6;background:#FBFCFE;}
+.al-range-ic{display:inline-flex;color:var(--text-3);}
+.al-range:hover .al-range-ic{color:var(--brand);}
+.al-f:nth-child(2) input{width:132px;}
+.al-f-q{flex:1 1 240px;}
+.al-f-q input{width:100%;}
+.al-k{font-size:12px;color:var(--text-3);white-space:nowrap;}
+.al-dash{color:var(--text-3);}
+.al-go{flex:0 0 auto;}
+
+.al-count{font-size:11.5px;color:var(--text-3);margin:0 2px 8px;font-variant-numeric:tabular-nums;}
+.al-wrap{border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:auto;}
+.al-tbl thead th{
+  position:sticky;top:0;z-index:2;background:#FBFCFE;
+  font-size:11.5px;font-weight:600;color:var(--text-3);
+  padding:9px 14px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;
+}
+.al-tbl tbody td{padding:9px 14px;border-bottom:1px solid var(--line-2);font-size:12.5px;vertical-align:top;}
+.al-tbl tbody tr:last-child td{border-bottom:0;}
+.al-tbl tbody tr:hover td{background:var(--panel-2);}
+.al-c-time{width:170px;}
+.al-c-user{width:130px;}
+.al-time{color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.al-user{color:var(--text);}
+.al-body{color:var(--text-2);line-height:1.5;}
+.al-who{color:var(--text-3);}
+.al-act{color:var(--text);}
+.al-detail{color:var(--text-3);}
+.al-empty{padding:40px 14px;text-align:center;font-size:12.5px;color:var(--text-3);}
+
+@media (max-width:720px){
+  .al-bar{padding:10px 12px;gap:8px;}
+  .al-f,.al-f-q{flex:1 1 100%;}
+  .al-f:nth-child(1) input,.al-f:nth-child(2) input,.al-f-q input{width:100%;}
+  .al-c-time{width:auto;}
+  .al-tbl thead{display:none;}
+  .al-tbl tbody td{border:0;padding:2px 12px;}
+  .al-tbl tbody tr{display:block;padding:10px 0;border-bottom:1px solid var(--line-2);}
+}
+
+/* ============ 钉钉提醒（2026-11-06） ============ */
+.dg-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+.dg-counts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.dg-chip{
+  display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);
+  font-size:12.5px;color:var(--text-2);cursor:pointer;
+  transition:background-color .12s var(--ease),border-color .12s var(--ease),color .12s var(--ease);
+}
+.dg-chip:hover{border-color:#C9D3E6;}
+.dg-chip.on{background:var(--brand-50);border-color:rgba(61,87,214,.38);color:var(--brand);}
+.dg-chip-n{font-variant-numeric:tabular-nums;font-weight:600;color:var(--text);}
+.dg-chip.on .dg-chip-n{color:var(--brand);}
+.dg-chip.warn .dg-chip-n{color:var(--danger-tx);}
+
+.dg-search{flex:1 1 220px;max-width:320px;}
+.dg-search input{height:30px;font-size:12.5px;}
+.dg-meta{display:block;font-size:11.5px;color:var(--text-3);margin:0 2px 8px;font-variant-numeric:tabular-nums;}
+
+.dg-wrap{border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:auto;}
+.dg-tbl thead th{
+  position:sticky;top:0;z-index:2;background:#FBFCFE;
+  font-size:11.5px;font-weight:600;color:var(--text-3);
+  padding:9px 14px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;
+}
+.dg-tbl tbody td{padding:9px 14px;border-bottom:1px solid var(--line-2);font-size:12.5px;vertical-align:middle;}
+.dg-tbl tbody tr:last-child td{border-bottom:0;}
+.dg-tbl tbody tr:hover td{background:var(--panel-2);}
+.dg-c-name{width:130px;}
+.dg-c-id{width:170px;}
+.dg-c-st{width:110px;}
+.dg-c-act{width:132px;text-align:right;}
+.dg-name{color:var(--text);font-weight:600;}
+.dg-id{color:var(--text-3);font-variant-numeric:tabular-nums;}
+.dg-ding{color:var(--text-2);}
+.dg-act{text-align:right;}
+.dg-act .btn + .btn{margin-left:6px;}
+
+.dg-st{display:inline-flex;align-items:center;gap:6px;font-size:12px;}
+.dg-dot{width:6px;height:6px;border-radius:50%;background:var(--text-3);}
+.dg-st.bound{color:var(--ok-tx);} .dg-st.bound .dg-dot{background:var(--ok);}
+.dg-st.unbound{color:var(--text-3);}
+.dg-st.dup{color:var(--danger-tx);} .dg-st.dup .dg-dot{background:var(--danger);}
+
+.dg-empty{padding:40px 14px;text-align:center;font-size:12.5px;color:var(--text-3);}
+
+@media (max-width:720px){
+  .dg-bar{gap:8px;}
+  .dg-search{max-width:none;flex:1 1 100%;}
+  .dg-c-name,.dg-c-id,.dg-c-st,.dg-c-act{width:auto;}
+  .dg-tbl thead{display:none;}
+  .dg-tbl tbody tr{display:block;padding:10px 0;border-bottom:1px solid var(--line-2);}
+  .dg-tbl tbody td{border:0;padding:1px 12px;}
+  .dg-act{text-align:left;margin-top:4px;}
+}
+
+/* 钉钉提醒：部门分组卡片（2026-11-06） */
+.dg-sec{margin-bottom:22px;}
+.dg-sec-head{display:flex;align-items:center;gap:10px;padding:0 2px 10px;}
+.dg-sec-t{margin:0;font-size:13px;font-weight:600;color:var(--text);}
+.dg-sec-n{font-size:11.5px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.dg-sec-s{font-size:11.5px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.dg-sec-head::after{content:'';flex:1 1 auto;height:1px;background:var(--line);}
+.dg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:10px;}
+.dg-card{
+  display:flex;flex-direction:column;gap:6px;padding:11px 13px;
+  background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  transition:border-color .12s var(--ease),background-color .12s var(--ease);
+}
+.dg-card:hover{border-color:rgba(61,87,214,.30);background:#FCFDFF;}
+.dg-card-top{display:flex;align-items:center;gap:8px;min-width:0;}
+.dg-card-name{font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dg-card-id{font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums;flex:0 0 auto;}
+.dg-card-st{margin-left:auto;font-size:11px;flex:0 0 auto;}
+.dg-card-st.bound{color:var(--ok-tx);} .dg-card-st.unbound{color:var(--text-3);} .dg-card-st.dup{color:var(--danger-tx);}
+.dg-card-sub{font-size:11.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dg-card-act{display:flex;gap:6px;opacity:0;transition:opacity .12s var(--ease);}
+.dg-card:hover .dg-card-act,.dg-card:focus-within .dg-card-act{opacity:1;}
+@media (max-width:720px){
+  .dg-grid{grid-template-columns:1fr;}
+  .dg-card-act{opacity:1;}
+}
+
+/* 表格操作列：主操作 + ⋯（2026-11-06） */
+.op-cell{white-space:nowrap;}
+.row-actions{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+.row-more{
+  position:static;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text-3);cursor:pointer;
+}
+.row-more:hover{background:var(--panel-3);border-color:var(--line);color:var(--text-2);}
+
+/* 发送记录：时间 / 状态 两组选择器之间留空隙（2026-11-06） */
+.nlog-sep{display:inline-block;width:1px;height:16px;background:var(--line);margin:0 10px;flex:0 0 auto;}

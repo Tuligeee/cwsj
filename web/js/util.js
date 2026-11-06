@@ -203,6 +203,17 @@ function mulberry32(a) {
   };
 }
 
+/* ---------- 接口地址 ----------
+   站点可能部署在 /cwsj/（正式）或 /cwsj-stg/（测试），
+   写死路径会让测试环境打到正式接口，所以从当前地址推出来。 */
+function apiBase() {
+  const m = location.pathname.match(/^\/([^\/]+)\//);
+  return (m && m[1] !== 'index.html') ? '/' + m[1] : '';
+}
+function apiUrl(path) {
+  return apiBase() + (path.charAt(0) === '/' ? path : '/' + path);
+}
+
 /* ---------- 主题 ---------- */
 const THEME_KEY = 'cwsj_theme';
 function applyTheme(t) {

@@ -81,6 +81,9 @@ const ICON_PATHS = {
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   dot: '',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
+  calendar: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M8 2.5v4M16 2.5v4M3 9.5h18"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
   upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/>'
 };
 function iconSvg(name, size) {
@@ -385,9 +388,111 @@ function starsNode(n, big) {
   for (let i = 1; i <= 5; i++) w.appendChild(h('span', { class: i > n ? 'off' : '' }, '★'));
   return w;
 }
+/* 表格行操作：主操作 + ⋯ 菜单（危险项红字，原有二次确认不变） */
+function rowActions(primary, items) {
+  const wrap = h('div', { class: 'row-actions' }, [primary]);
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return wrap;
+  wrap.appendChild(h('button', {
+    class: 'btn-more row-more', title: '更多操作', html: iconSvg('more', 16),
+    onclick: (ev) => {
+      ev.stopPropagation();
+      const r = ev.currentTarget.getBoundingClientRect();
+      const pop = h('div', {
+        class: 'menu-pop',
+        style: { top: (r.bottom + 6) + 'px', left: Math.max(8, r.right - 150) + 'px' }
+      }, list.map(([label, fn, cls]) => h('button', {
+        class: cls || '',
+        onclick: (e2) => { e2.stopPropagation(); pop.remove(); document.removeEventListener('click', close); fn(); }
+      }, label)));
+      const close = () => { pop.remove(); document.removeEventListener('scroll', close, true); };
+      document.body.appendChild(pop);
+      setTimeout(() => document.addEventListener('click', close), 0);
+      document.addEventListener('scroll', close, true);
+    }
+  }));
+  return wrap;
+}
+
 function progressNode(val, cls) {
   return h('div', { class: 'progress' }, h('div', { class: 'progress-fill ' + (cls || ''), style: { width: clamp(val, 0, 100) + '%' } }));
 }
+/* 甜甜圈（2026-11-06）：圈上不写字；悬停整段加粗并弹出数据条
+   parts = [{k:'按时完成', v:3, c:'ok'|'warn'|'bad'}] */
+function donutHover(parts, opts) {
+  opts = opts || {};
+  const total = parts.reduce((a, b) => a + (b.v || 0), 0);
+  const R = 62, SW = 20, C = 2 * Math.PI * R, SZ = 172;
+  const wrap = h('div', { class: 'dh-wrap' });
+  const tip = h('div', { class: 'dh-tip' });
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + SZ + ' ' + SZ);
+  svg.setAttribute('class', 'dh-svg');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', '任务结果构成');
+
+  const track = document.createElementNS(svgNS, 'circle');
+  track.setAttribute('cx', SZ / 2); track.setAttribute('cy', SZ / 2);
+  track.setAttribute('r', R); track.setAttribute('fill', 'none');
+  track.setAttribute('stroke', 'var(--panel-3)'); track.setAttribute('stroke-width', SW);
+  svg.appendChild(track);
+
+  let off = 0;
+  parts.forEach(p => {
+    const v = p.v || 0;
+    const len = total ? (v / total) * C : 0;
+    const c1 = document.createElementNS(svgNS, 'circle');
+    c1.setAttribute('cx', SZ / 2); c1.setAttribute('cy', SZ / 2);
+    c1.setAttribute('r', R); c1.setAttribute('fill', 'none');
+    c1.setAttribute('class', 'dh-seg ' + p.c);
+    c1.setAttribute('stroke-width', SW);
+    c1.setAttribute('stroke-dasharray', len + ' ' + (C - len));
+    c1.setAttribute('stroke-dashoffset', -off);
+    c1.setAttribute('transform', 'rotate(-90 ' + SZ / 2 + ' ' + SZ / 2 + ')');
+    /* 悬停：整段加粗 + 数据条 */
+    const show = (ev) => {
+      c1.classList.add('on');
+      clear(tip);
+      tip.appendChild(h('span', { class: 'dh-sw ' + p.c }));
+      tip.appendChild(h('span', { class: 'dh-k', text: p.k }));
+      tip.appendChild(h('span', { class: 'dh-v', text: String(v) }));
+      tip.appendChild(h('span', { class: 'dh-p', text: total ? (v / total * 100).toFixed(2) + '%' : '—' }));
+      tip.classList.add('on');
+      move(ev);
+    };
+    const move = (ev) => {
+      if (!ev || !ev.clientX) return;
+      /* 贴着指针显示，并夹在视口内，避免被卡片裁掉 */
+      const pad = 8;
+      const tw = tip.offsetWidth || 150, th = tip.offsetHeight || 28;
+      let x = ev.clientX + 14;
+      let y = ev.clientY - th - 10;
+      if (x + tw > window.innerWidth - pad) x = ev.clientX - tw - 14;
+      if (y < pad) y = ev.clientY + 16;
+      tip.style.left = Math.round(x) + 'px';
+      tip.style.top = Math.round(y) + 'px';
+    };
+    const hide = () => { c1.classList.remove('on'); tip.classList.remove('on'); };
+    c1.addEventListener('mouseenter', show);
+    c1.addEventListener('mousemove', move);
+    c1.addEventListener('mouseleave', hide);
+    c1.addEventListener('click', show);
+    off += len;
+    svg.appendChild(c1);
+  });
+
+  wrap.appendChild(svg);
+  if (total) {
+    wrap.appendChild(h('div', { class: 'dh-center' }, [
+      h('span', { class: 'dh-total', text: String(total) }),
+      h('span', { class: 'dh-label', text: opts.centerLabel || '' })
+    ]));
+  }
+  wrap.appendChild(tip);
+  return wrap;
+}
+
 function lightbox(src) {
   const lb = h('div', { class: 'lightbox', onclick: () => lb.remove() }, h('img', { src: src }));
   document.body.appendChild(lb);

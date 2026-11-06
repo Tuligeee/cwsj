@@ -179,13 +179,38 @@ function log(userId, action, detail) {
   } catch (_) { /* 日志失败不影响主流程 */ }
 }
 
-function listAudit(limit, offset) {
-  const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+/* opts: { from, to, user, q }（时间按 'YYYY-MM-DD HH:mm:ss' 字符串比较，与 at 同格式） */
+function listAudit(limit, offset, opts) {
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
   const off = Math.max(parseInt(offset, 10) || 0, 0);
+  const o = opts || {};
+  const w = [], p = [];
+  if (o.from) { w.push('a.at >= ?'); p.push(String(o.from)); }
+  if (o.to) { w.push('a.at <= ?'); p.push(String(o.to)); }
+  if (o.user) {
+    w.push('(COALESCE(u.name, a.userId) LIKE ? OR a.userId LIKE ?)');
+    p.push('%' + o.user + '%', '%' + o.user + '%');
+  }
+  /* 文本检索与「中文动作名 → action 代码」是"或"关系，不能各占一个 AND 条件 */
+  if (o.q || (o.actions && o.actions.length)) {
+    const ors = [], qp = [];
+    if (o.q) {
+      ors.push('a.action LIKE ?', 'a.detail LIKE ?', 'COALESCE(u.name, a.userId) LIKE ?');
+      qp.push('%' + o.q + '%', '%' + o.q + '%', '%' + o.q + '%');
+    }
+    if (o.actions && o.actions.length) {
+      ors.push('a.action IN (' + o.actions.slice(0, 40).map(() => '?').join(',') + ')');
+      o.actions.slice(0, 40).forEach(x => qp.push(x));
+    }
+    w.push('(' + ors.join(' OR ') + ')');
+    qp.forEach(x => p.push(x));
+  }
+  const where = w.length ? ' WHERE ' + w.join(' AND ') : '';
+  const base = "FROM audit_log a LEFT JOIN users u ON u.id = a.userId" + where;
   return {
-    total: db.prepare('SELECT COUNT(*) AS c FROM audit_log').get().c,
+    total: db.prepare('SELECT COUNT(*) AS c ' + base).get(...p).c,
     rows: db.prepare("SELECT a.id, a.userId, a.action, a.detail, a.at, COALESCE(u.name, a.userId) AS name " +
-      "FROM audit_log a LEFT JOIN users u ON u.id = a.userId ORDER BY a.id DESC LIMIT ? OFFSET ?").all(lim, off),
+      base + " ORDER BY a.id DESC LIMIT ? OFFSET ?").all(...p, lim, off),
   };
 }
 

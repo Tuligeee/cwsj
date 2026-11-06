@@ -1359,13 +1359,23 @@ function pageHqStats() {
         statNode(ov.total.ontimeRate.toFixed(1) + '%', '按时完成率')
       ])
     ]));
-    body.appendChild(h('div', { class: 'fhint', style: { margin: '-2px 0 4px' },
-      text: '当前考核规则：' + (acfg.mode === 'step' ? '阶梯得分' : '比例折算') + ' · 基础分 ' + acfg.base
-        + '（完成率占 ' + acfg.completionWeight + ' / 按时率占 ' + acfg.ontimeWeight + '）· 逾期提交每次 -' + acfg.lateSubmitDeduct
-        + ' · 逾期未交每次 -' + acfg.overdueMissDeduct + ' · 合格线 ' + acfg.passLine + ' 分（点右上角「⚙ 考核设置」可调整）' }));
+    /* 考核规则：拆成可扫的标签，不再是一句 60 字长文 */
+    body.appendChild(h('div', { class: 'st-rule' }, [
+      h('span', { class: 'st-rule-k', text: '考核口径' }),
+      h('span', { class: 'st-rule-i', text: acfg.mode === 'step' ? '阶梯得分' : '比例折算' }),
+      h('span', { class: 'st-rule-i', text: '基础分 ' + acfg.base }),
+      h('span', { class: 'st-rule-i', text: '完成率 ' + acfg.completionWeight + ' / 按时率 ' + acfg.ontimeWeight }),
+      h('span', { class: 'st-rule-i', text: '逾期提交 -' + acfg.lateSubmitDeduct }),
+      h('span', { class: 'st-rule-i', text: '逾期未交 -' + acfg.overdueMissDeduct }),
+      h('span', { class: 'st-rule-i', text: '合格线 ' + acfg.passLine })
+    ]));
     body.appendChild(h('div', { class: 'card mt14' }, [
       h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '各门店完成率排名'), h('div', { class: 'cd', text: rangeText() + ' · ' + rangeDays() + ' 天 · 用于门店考核' })])]),
-      h('div', { class: 'card-body' }, rank.every(r => !r.rate) ? emptyNode('本期还没有门店完成记录', null, 'chart') : barChart(rank.map((r, i) => ({
+      h('div', { class: 'card-body' }, rank.every(r => !r.rate) ? h('div', { class: 'st-empty' }, [
+        h('span', { class: 'st-empty-ic', html: iconSvg('chart', 16) }),
+        h('span', { class: 'st-empty-t', text: '本期还没有门店完成记录' }),
+        h('span', { class: 'st-empty-s', text: '有提交后这里会按完成率排序' })
+      ]) : barChart(rank.map((r, i) => ({
         name: r.store.name,
         value: r.rate,
         text: r.rate.toFixed(1) + '%　(' + r.done + '/' + r.expected + ')',
@@ -1375,11 +1385,14 @@ function pageHqStats() {
     ]));
     const grid = h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }, class: 'mt14' });
     grid.appendChild(h('div', { class: 'card' }, [
-      h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '全区任务结果构成')])]),
-      h('div', { class: 'card-body' }, donutChart([
-        { label: '按时完成', value: ov.total.ontime, color: ov.total.ontime ? 'var(--ok)' : 'var(--text-3)' },
-        { label: '逾期完成', value: ov.total.late, color: ov.total.late ? 'var(--warn)' : 'var(--text-3)' },
-        { label: '逾期未提交', value: ov.total.missed, color: ov.total.missed ? 'var(--danger)' : 'var(--text-3)' }
+      h('div', { class: 'card-head' }, [h('div', {}, [
+        h('h3', {}, '全区任务结果构成'),
+        h('div', { class: 'cd', text: '应完成 ' + ov.total.expected + ' 个任务实例 · 悬停查看占比' })
+      ])]),
+      h('div', { class: 'card-body' }, donutHover([
+        { k: '按时完成', v: ov.total.ontime, c: 'ok' },
+        { k: '逾期完成', v: ov.total.late, c: 'warn' },
+        { k: '逾期未提交', v: ov.total.missed, c: 'bad' }
       ], { centerLabel: '实例数' }))
     ]));
     /* 各周期（按全公司聚合） */
@@ -1391,38 +1404,46 @@ function pageHqStats() {
     });
     grid.appendChild(h('div', { class: 'card' }, [
       h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '各周期完成率'), h('div', { class: 'cd', text: '每日 / 每周 / 每月必做 / 专项任务' })])]),
-      h('div', { class: 'card-body' }, barChart(['daily', 'weekly', 'monthly', 'once'].map(k => ({
-        name: CYCLE_LABEL[k], value: pct(cycleAgg[k].d, cycleAgg[k].e),
-        text: pct(cycleAgg[k].d, cycleAgg[k].e).toFixed(1) + '%　(' + cycleAgg[k].d + '/' + cycleAgg[k].e + ')',
-        color: pct(cycleAgg[k].d, cycleAgg[k].e) ? 'var(--brand)' : 'var(--text-3)'
-      })), { max: 100 }))
+      h('div', { class: 'card-body' }, ['daily', 'weekly', 'monthly', 'once'].map(k => {
+        const a = cycleAgg[k], r2 = pct(a.d, a.e);
+        return h('div', { class: 'st-cyc' }, [
+          h('span', { class: 'st-cyc-k', text: CYCLE_LABEL[k] }),
+          h('span', { class: 'st-cyc-bar' }, h('span', {
+            class: 'st-cyc-fill' + (r2 ? '' : ' zero'), style: { width: r2 + '%' }
+          })),
+          h('span', { class: 'st-cyc-v', text: a.d + '/' + a.e }),
+          h('span', { class: 'st-cyc-p', text: r2.toFixed(1) + '%' })
+        ]);
+      }))
     ]));
     body.appendChild(grid);
 
     const tbl = h('table', { class: 'tbl' }, [
       h('thead', {}, h('tr', {}, [
-        h('th', {}, '排名'), h('th', {}, '门店'), h('th', {}, '城市'), h('th', { class: 'num' }, '应完成'), h('th', { class: 'num' }, '已完成'),
-        h('th', { class: 'num' }, '完成率'), h('th', { class: 'num' }, '按时完成'), h('th', { class: 'num' }, '按时率'),
-        h('th', { class: 'num' }, '逾期完成'), h('th', { class: 'num' }, '逾期未交'), h('th', { class: 'num' }, '考核得分'), h('th', {}, '考核建议')
+        h('th', { class: 'st-th-rank' }, '排名'), h('th', {}, '门店'), h('th', { class: 'num' }, '应完成'),
+        h('th', { class: 'num' }, '已完成'), h('th', { class: 'num' }, '完成率'), h('th', { class: 'num' }, '按时'),
+        h('th', { class: 'num' }, '逾期完成'), h('th', { class: 'num' }, '逾期未交'),
+        h('th', { class: 'num' }, '考核得分'), h('th', {}, '考核建议')
       ])),
       h('tbody', {}, rank.map((r, i) => {
         const sc = scores[r.storeId];
         return h('tr', {}, [
-          h('td', {}, String(i + 1)),
-          h('td', {}, r.store.name),
-          h('td', {}, r.city),
+          h('td', { class: 'st-rank' }, String(i + 1)),
+          h('td', {}, [
+            h('div', { class: 'st-store', text: r.store.name }),
+            h('div', { class: 'st-city', text: r.city || '' })
+          ]),
           h('td', { class: 'num' }, String(r.expected)),
           h('td', { class: 'num' }, String(r.done)),
           h('td', { class: 'num' }, r.rate.toFixed(1) + '%'),
           h('td', { class: 'num' }, String(r.ontime)),
-          h('td', { class: 'num' }, r.ontimeRate.toFixed(1) + '%'),
           h('td', { class: 'num' }, String(r.late)),
-          h('td', { class: 'num' }, String(r.missed)),
+          h('td', { class: 'num' + (r.missed ? ' bad' : '') }, String(r.missed)),
           h('td', { class: 'num' }, h('a', {
-            href: 'javascript:void(0)', style: { fontWeight: '700', color: sc.pass ? 'var(--ok-tx)' : 'var(--danger-tx)' },
+            href: 'javascript:void(0)', style: { fontWeight: '600', color: sc.pass ? 'var(--ok-tx)' : 'var(--danger-tx)' },
             onclick: () => openScoreDetail(r.store.name, sc, acfg)
           }, sc.total.toFixed(1))),
-          h('td', {}, tagNode(grade(r), gradeCls(r)))
+          h('td', {}, h('span', { class: 'st-grade ' + (sc.pass ? 'pass' : 'fail'), text: grade(r) }))
         ]);
       }))
     ]);
@@ -1679,7 +1700,7 @@ function pageAdmin() {
 
   function paint() {
     clear(tabsBar);
-    [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒'], ['nlog', '提醒记录']].forEach(([k, l]) => {
+    [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒']].forEach(([k, l]) => {
       tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; paint(); } }, l));
     });
     clear(body);
@@ -1687,7 +1708,6 @@ function pageAdmin() {
     else if (tab === 'account') paintAccountTab();
     else if (tab === 'audit') paintAuditTab();
     else if (tab === 'ding') paintDingTab();
-    else if (tab === 'nlog') paintNotifyLogTab();
     else paintSnapTab();
   }
 
@@ -1703,7 +1723,9 @@ function pageAdmin() {
   }
 
   /* ---------- 提醒记录（只读，管理员 + 管委会） ---------- */
-  function paintNotifyLogTab() {
+  /* host 为空时挂到当前 tab 的主体；钉钉提醒页会传自己的容器进来 */
+  function paintNotifyLogTab(host) {
+    const root = host || body;
     const ST_LABEL = { sent: '已发送', skipped: '被拦截', dry: '预演', pending: '待发', deferred: '免打扰' };
     const ST_COLOR = { sent: 'var(--ok)', skipped: 'var(--danger)', dry: 'var(--text-3)', pending: 'var(--warn)', deferred: 'var(--warn)' };
     const SCEN = { A1:'新任务',A2:'临期',A3:'逾期',A4:'催办',A5:'门店已提交',
@@ -1746,11 +1768,15 @@ function pageAdmin() {
       window.open(((window.Api && window.Api.base) || '') + '/api/notify/export?' + p.toString(), '_blank');
     } }, '导出 CSV');
 
-    head.appendChild(daysRow); head.appendChild(stRow); head.appendChild(moreBtn); head.appendChild(exportBtn);
+    /* 时间与状态是两组选择器，中间留空隙 + 竖分隔，避免看成一组 */
+    head.appendChild(daysRow);
+    head.appendChild(h('span', { class: 'nlog-sep' }));
+    head.appendChild(stRow);
+    head.appendChild(moreBtn); head.appendChild(exportBtn);
     head.appendChild(h('span', { style: { flex: '1' } })); head.appendChild(info);
-    body.appendChild(head);
-    body.appendChild(moreBox);
-    body.appendChild(body2);
+    root.appendChild(head);
+    root.appendChild(moreBox);
+    root.appendChild(body2);
     repaintChips();
 
     function load() {
@@ -1899,50 +1925,131 @@ function pageAdmin() {
 
   /* ---------- 钉钉提醒 ---------- */
   const DING_AUTH = () => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') });
+  let dFilter = 'all', dq = '', dSub = 'bind';
   function paintDingTab() {
-    const head = h('div', { class: 'row', style: { gap: '8px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' } });
-    const info = h('span', { class: 'fhint', style: { margin: '0' }, text: '加载中' });
-    const btnR = h('button', { class: 'btn btn-sm', onclick: async () => {
-      btnR.disabled = true; btnR.textContent = '刷新中…';
-      const r = await fetch('/cwsj/api/ding/refresh', { method: 'POST', headers: DING_AUTH() })
-        .then(x => x.json()).catch(e => ({ ok: false, msg: e.message }));
-      btnR.disabled = false; btnR.textContent = '刷新通讯录';
-      if (r.ok) { toast('已刷新 ' + r.count + ' 人'); paint(); } else toast(r.msg || '刷新失败', 'err');
-    } }, '刷新通讯录');
-    head.appendChild(btnR); head.appendChild(info);
-    body.appendChild(head);
-    const list = h('div', { class: 'task-list' });
-    body.appendChild(list);
-    fetch('/cwsj/api/ding/list', { headers: DING_AUTH() }).then(r => r.json()).then(r => {
-      if (!r.ok) { info.textContent = r.msg || '读取失败'; return; }
-      const bound = r.rows.filter(x => x.dingUserid).length;
-      const dup = r.rows.filter(x => x.dup).length;
-      info.textContent = '钉钉通讯录 ' + r.peopleCount + ' 人 ｜ 已绑定 ' + bound + ' / 未绑定 '
-        + (r.rows.length - bound) + (dup ? ' / 重复 ' + dup : '')
-        + (r.snapshotAt ? ' ｜ 快照 ' + r.snapshotAt.slice(0, 16).replace('T', ' ') : '');
-      r.rows.forEach(row => {
-        const st = row.dup ? '重复' : (row.dingUserid ? '已绑定' : '未绑定');
-        const tg = row.dup ? 'tag-red' : (row.dingUserid ? 'tag-green' : 'tag-line');
-        list.appendChild(h('div', { class: 'card', style: { padding: '10px 12px', marginBottom: '8px' } }, [
-          h('div', { class: 'row', style: { gap: '8px', alignItems: 'center' } }, [
-            h('b', { text: row.name }),
-            h('span', { class: 'fhint', style: { margin: '0' }, text: row.userId + ' · ' + (row.type === 'store' ? '门店' : '总部') }),
-            tagNode(st, tg)
-          ]),
-          h('div', { class: 'row', style: { gap: '8px', alignItems: 'center', marginTop: '6px' } }, [
-            h('span', { style: { fontSize: '12px', color: 'var(--text-2)' }, text: '钉钉：' + (row.dingName || '—') }),
-            h('span', { style: { flex: '1' } }),
-            h('button', { class: 'btn btn-xs', onclick: () => openDingBind(row) }, '改绑'),
-            row.dingUserid ? h('button', { class: 'btn btn-xs', onclick: () => testDing(row) }, '测试') : null
-          ])
-        ]));
+    /* 子切换：账号绑定 / 发送记录（原「提醒记录」独立页并入这里） */
+    const subBar = h('div', { class: 'tabs chip-tabs m2-keep dg-sub' });
+    const pane = h('div');
+    [['bind', '账号绑定'], ['log', '发送记录']].forEach(([k, l]) => {
+      subBar.appendChild(h('div', {
+        class: 'tab' + (dSub === k ? ' active' : ''), onclick: () => { dSub = k; paint(); }
+      }, l));
+    });
+    body.appendChild(subBar);
+    body.appendChild(pane);
+    if (dSub === 'log') { paintNotifyLogTab(pane); return; }
+
+    let allRows = [];
+    const countBar = h('div', { class: 'dg-counts' });
+    const info = h('span', { class: 'dg-meta', text: '加载中' });
+    const tblBox = h('div');
+    const searchInput = inputNode({
+      placeholder: '搜索姓名 / 账号 / 钉钉名',
+      oninput: e => { dq = e.target.value.trim(); render(); }
+    });
+    const btnR = h('button', {
+      class: 'btn btn-sm',
+      onclick: async () => {
+        btnR.disabled = true; btnR.textContent = '刷新中…';
+        const r = await fetch(apiUrl('/api/ding/refresh'), { method: 'POST', headers: DING_AUTH() })
+          .then(x => x.json()).catch(e => ({ ok: false, msg: e.message }));
+        btnR.disabled = false; btnR.textContent = '刷新通讯录';
+        if (r.ok) { toast('已刷新 ' + r.count + ' 人'); paint(); } else toast(r.msg || '刷新失败', 'err');
+      }
+    }, '刷新通讯录');
+
+    function stateOf(row) { return row.dup ? 'dup' : (row.dingUserid ? 'bound' : 'unbound'); }
+    function matched(row) {
+      if (dFilter !== 'all' && stateOf(row) !== dFilter) return false;
+      if (!dq) return true;
+      return (row.name + row.userId + (row.dingName || '')).toLowerCase().indexOf(dq.toLowerCase()) >= 0;
+    }
+
+    function renderCounts() {
+      clear(countBar);
+      const n = k => allRows.filter(x => stateOf(x) === k).length;
+      [['all', '全部', allRows.length], ['bound', '已绑定', n('bound')],
+       ['unbound', '未绑定', n('unbound')], ['dup', '重复', n('dup')]].forEach(([k, label, num]) => {
+        countBar.appendChild(h('button', {
+          class: 'dg-chip' + (dFilter === k ? ' on' : '') + (k === 'dup' && num ? ' warn' : ''),
+          type: 'button',
+          onclick: () => { dFilter = k; render(); }
+        }, [h('span', { class: 'dg-chip-l', text: label }), h('span', { class: 'dg-chip-n', text: String(num) })]));
       });
+    }
+
+    /* 部门分组（与通讯录同一套结构）：总部按部门，门店单独一组 */
+    function deptOf(row) {
+      if (row.type === 'store') return '门店';
+      const h = (state.hq || []).find(x => x.id === row.userId);
+      return (h && h.dept) || '总部';
+    }
+    function render() {
+      renderCounts();
+      clear(tblBox);
+      const rows = allRows.filter(matched);
+      if (!rows.length) {
+        tblBox.appendChild(h('div', { class: 'dg-empty', text: allRows.length ? '没有匹配的账号' : '还没有账号' }));
+        return;
+      }
+      const order = (state.departments || []).slice();
+      if (order.indexOf('门店') < 0) order.push('门店');
+      const groups = {};
+      rows.forEach(x => { const d = deptOf(x); (groups[d] = groups[d] || []).push(x); });
+      const keys = order.filter(d => groups[d]).concat(Object.keys(groups).filter(d => order.indexOf(d) < 0));
+
+      keys.forEach(dep => {
+        const list = groups[dep].slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hans-CN'));
+        const sec = h('section', { class: 'dg-sec' });
+        const boundN = list.filter(x => stateOf(x) === 'bound').length;
+        sec.appendChild(h('div', { class: 'dg-sec-head' }, [
+          h('h3', { class: 'dg-sec-t', text: dep }),
+          h('span', { class: 'dg-sec-n', text: list.length + ' 人' }),
+          dep !== '门店' ? h('span', { class: 'dg-sec-s', text: '已绑定 ' + boundN + '/' + list.length }) : null
+        ]));
+        const grid = h('div', { class: 'dg-grid' });
+        list.forEach(row => {
+          const st = stateOf(row);
+          const stText = st === 'dup' ? '重复' : (st === 'bound' ? '已绑定' : '未绑定');
+          grid.appendChild(h('div', { class: 'dg-card' }, [
+            h('div', { class: 'dg-card-top' }, [
+              h('span', { class: 'dg-st ' + st }, [h('span', { class: 'dg-dot' })]),
+              h('span', { class: 'dg-card-name', text: row.name }),
+              h('span', { class: 'dg-card-id', text: row.userId }),
+              h('span', { class: 'dg-card-st ' + st, text: stText })
+            ]),
+            h('div', { class: 'dg-card-sub', text: '钉钉：' + (row.dingName || '—') }),
+            h('div', { class: 'dg-card-act' }, [
+              h('button', { class: 'btn btn-xs', onclick: () => openDingBind(row) }, st === 'bound' ? '改绑' : '绑定'),
+              st === 'bound' ? h('button', { class: 'btn btn-xs', onclick: () => testDing(row) }, '测试') : null
+            ])
+          ]));
+        });
+        sec.appendChild(grid);
+        tblBox.appendChild(sec);
+      });
+    }
+
+    pane.appendChild(h('div', { class: 'dg-bar' }, [
+      countBar,
+      h('div', { class: 'dg-search' }, [searchInput]),
+      btnR
+    ]));
+    pane.appendChild(info);
+    pane.appendChild(tblBox);
+
+    fetch(apiUrl('/api/ding/list'), { headers: DING_AUTH() }).then(r => r.json()).then(r => {
+      if (!r.ok) { info.textContent = r.msg || '读取失败'; return; }
+      allRows = r.rows || [];
+      info.textContent = '钉钉通讯录 ' + r.peopleCount + ' 人'
+        + (r.snapshotAt ? ' · 快照 ' + r.snapshotAt.slice(0, 16).replace('T', ' ') : '');
+      render();
     }).catch(() => { info.textContent = '网络错误'; });
   }
 
   function testDing(row) {
     toast('正在发送…');
-    fetch('/cwsj/api/ding/test', { method: 'POST', headers: DING_AUTH(), body: JSON.stringify({ userId: row.userId }) })
+    fetch(apiUrl('/api/ding/test'), { method: 'POST', headers: DING_AUTH(), body: JSON.stringify({ userId: row.userId }) })
       .then(r => r.json())
       .then(r => toast(r.ok ? '已发送给 ' + (row.dingName || row.name) : (r.msg || '发送失败'), r.ok ? null : 'err'))
       .catch(() => toast('网络错误', 'err'));
@@ -1957,21 +2064,21 @@ function pageAdmin() {
       footer: [
         h('button', { class: 'btn', onclick: () => inst.close() }, '关闭'),
         h('button', { class: 'btn btn-danger', onclick: () => {
-          fetch('/cwsj/api/ding/bind', { method: 'POST', headers: DING_AUTH(), body: JSON.stringify({ userId: row.userId }) })
+          fetch(apiUrl('/api/ding/bind'), { method: 'POST', headers: DING_AUTH(), body: JSON.stringify({ userId: row.userId }) })
             .then(r => r.json()).then(() => { inst.close(); paint(); toast('已解绑'); });
         } }, '解除绑定')
       ]
     });
     const search = () => {
       clear(box);
-      fetch('/cwsj/api/ding/people?q=' + encodeURIComponent(input.value.trim()), { headers: DING_AUTH() })
+      fetch(apiUrl('/api/ding/people?q=' + encodeURIComponent(input.value.trim())), { headers: DING_AUTH() })
         .then(r => r.json()).then(r => {
           if (!r.ok) { box.appendChild(h('div', { class: 'fhint', text: r.msg || '读取失败' })); return; }
           (r.rows || []).forEach(p => {
             box.appendChild(h('div', {
               class: 'card', style: { padding: '9px 11px', marginBottom: '6px', cursor: 'pointer' },
               onclick: () => {
-                fetch('/cwsj/api/ding/bind', { method: 'POST', headers: DING_AUTH(),
+                fetch(apiUrl('/api/ding/bind'), { method: 'POST', headers: DING_AUTH(),
                   body: JSON.stringify({ userId: row.userId, dingUserid: p.userid }) })
                   .then(x => x.json())
                   .then(x => { if (x.ok) { inst.close(); paint(); toast('已绑定 ' + x.dingName); } else toast(x.msg || '绑定失败', 'err'); });
@@ -1989,29 +2096,105 @@ function pageAdmin() {
   }
 
   /* ---------- 操作日志 ---------- */
+  let aFrom = '', aTo = '', aUser = '', aQ = '';
   function paintAuditTab() {
-    const box = h('div', { class: 'audit-list' }, [h('div', { class: 'fhint', text: '加载中' })]);
-    body.appendChild(box);
-    fetch('/cwsj/api/audit?limit=80', { headers: { Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') } })
-      .then(r => r.json())
-      .then(r => {
-        clear(box);
-        if (!r.ok) { box.appendChild(h('div', { class: 'fhint', text: r.msg || '读取失败' })); return; }
-        r.rows.forEach(row => {
-          box.appendChild(h('div', { class: 'audit-row' }, [
-            h('div', { class: 'ar-l' }, [
-              h('div', { class: 'ar-a', text: (window.AUDIT_LABEL && AUDIT_LABEL[row.action]) || row.action }),
-              h('div', { class: 'ar-d', text: row.detail || '' })
-            ]),
-            h('div', { class: 'ar-r' }, [
-              h('div', { class: 'ar-u', text: row.name || row.userId || '' }),
-              h('div', { class: 'ar-t', text: row.at })
-            ])
-          ]));
-        });
-        box.appendChild(h('div', { class: 'fhint', text: '共 ' + r.total + ' 条，显示最近 ' + r.rows.length + ' 条' }));
+    /* 默认区间：今天 00:00:00 ~ 23:59:59 */
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    if (!aFrom) aFrom = ymd(now) + ' 00:00:00';
+    if (!aTo) aTo = ymd(now) + ' 23:59:59';
+
+    /* 时间用一个框（与数据统计同一个选择器），不再并排两个输入框 */
+    const ymdOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const parseYmd = s => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(); };
+    let dFrom = parseYmd(aFrom), dTo = parseYmd(aTo);
+    const rangeText = h('span', { class: 'al-range-t' });
+    function syncRange() {
+      const days = Math.round((dTo - dFrom) / 86400000) + 1;
+      rangeText.textContent = ymdOf(dFrom) + ' ~ ' + ymdOf(dTo) + ' · ' + days + ' 天';
+      aFrom = ymdOf(dFrom) + ' 00:00:00';
+      aTo = ymdOf(dTo) + ' 23:59:59';
+    }
+    const rangeBtn = h('button', {
+      class: 'al-range', type: 'button', title: '选择时间区间',
+      onclick: () => openDateRange({
+        from: dFrom, to: dTo,
+        onPick: ({ from, to }) => { dFrom = from; dTo = to; syncRange(); load(); }
       })
-      .catch(() => { clear(box); box.appendChild(h('div', { class: 'fhint', text: '网络错误' })); });
+    }, [h('span', { class: 'al-range-ic', html: iconSvg('calendar', 14) }), rangeText]);
+    syncRange();
+
+    const inUser = inputNode({ value: aUser, placeholder: '请输入操作员工' });
+    const inQ = inputNode({ value: aQ, placeholder: '请输入操作内容' });
+    const resultBox = h('div');
+
+    function load() {
+      syncRange();
+      aUser = inUser.value.trim(); aQ = inQ.value.trim();
+      clear(resultBox);
+      resultBox.appendChild(h('div', { class: 'fhint', text: '加载中' }));
+      const qs = new URLSearchParams({ limit: '200' });
+      if (aFrom) qs.set('from', aFrom);
+      if (aTo) qs.set('to', aTo);
+      if (aUser) qs.set('user', aUser);
+      if (aQ) {
+        qs.set('q', aQ);
+        /* 「登录」「提交完成」这类中文词，翻成 action 代码一起查 */
+        const hits = Object.keys(window.AUDIT_LABEL || {})
+          .filter(k => AUDIT_LABEL[k].indexOf(aQ) >= 0);
+        if (hits.length) qs.set('actions', hits.join(','));
+      }
+      fetch(apiUrl('/api/audit?' + qs.toString()), {
+        headers: { Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') }
+      }).then(r => r.json()).then(r => {
+        clear(resultBox);
+        if (!r.ok) { resultBox.appendChild(h('div', { class: 'fhint', text: r.msg || '读取失败' })); return; }
+        const rows = r.rows || [];
+        const tbl = h('table', { class: 'tbl al-tbl' }, [
+          h('thead', {}, h('tr', {}, [
+            h('th', { class: 'al-c-time' }, '操作时间'),
+            h('th', { class: 'al-c-user' }, '操作人'),
+            h('th', {}, '操作内容')
+          ])),
+          h('tbody', {}, rows.map(row => {
+            const label = (window.AUDIT_LABEL && AUDIT_LABEL[row.action]) || row.action;
+            const who = row.name || row.userId || '系统';
+            const detail = row.detail && row.detail !== who ? row.detail : '';
+            return h('tr', {}, [
+              h('td', { class: 'al-time', text: row.at }),
+              h('td', { class: 'al-user', text: who }),
+              h('td', { class: 'al-body' }, [
+                h('span', { class: 'al-who', text: '[' + who + ']' }),
+                h('span', { class: 'al-act', text: label }),
+                detail ? h('span', { class: 'al-detail', text: ' · ' + detail }) : null
+              ])
+            ]);
+          }))
+        ]);
+        resultBox.appendChild(h('div', { class: 'al-count', text: '共 ' + r.total + ' 条' + (rows.length < r.total ? '，显示最近 ' + rows.length + ' 条' : '') }));
+        resultBox.appendChild(h('div', { class: 'al-wrap' }, rows.length ? tbl : h('div', { class: 'al-empty', text: '这段时间没有匹配的操作记录' })));
+      }).catch(() => { clear(resultBox); resultBox.appendChild(h('div', { class: 'fhint', text: '网络错误' })); });
+    }
+
+    [inUser, inQ].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') load(); }));
+    body.appendChild(h('div', { class: 'al-bar' }, [
+      h('div', { class: 'al-f' }, [
+        h('span', { class: 'al-k', text: '操作时间' }),
+        rangeBtn
+      ]),
+      h('div', { class: 'al-f' }, [
+        h('span', { class: 'al-k', text: '操作员工' }),
+        inUser
+      ]),
+      h('div', { class: 'al-f al-f-q' }, [
+        h('span', { class: 'al-k', text: '操作内容' }),
+        inQ
+      ]),
+      h('button', { class: 'btn btn-primary btn-sm al-go', onclick: load }, '查询')
+    ]));
+    body.appendChild(resultBox);
+    load();
   }
 
   /* ---------- 门店与分区 ---------- */
@@ -2058,23 +2241,21 @@ function pageAdmin() {
         h('td', {}, s.city),
         h('td', {}, regionSel),
         h('td', {}, s.enabled === false ? tagNode('已停用', 'tag-red') : tagNode('正常', 'tag-green')),
-        h('td', {}, h('div', { class: 'row', style: { gap: '6px' } }, [
+        h('td', { class: 'op-cell' }, rowActions(
           h('button', { class: 'btn btn-xs', onclick: () => openStoreEditor(s, paint) }, '编辑'),
-          h('button', { class: 'btn btn-xs', onclick: () => openResetPwd(s, paint) }, '重置密码'),
-          h('button', {
-            class: 'btn btn-xs', onclick: () => confirmDialog({
+          [
+            ['重置密码', () => openResetPwd(s, paint)],
+            [s.enabled === false ? '启用账号' : '停用账号', () => confirmDialog({
               title: (s.enabled === false ? '启用' : '停用') + '门店账号', okText: s.enabled === false ? '启用' : '停用',
               message: s.enabled === false ? '启用后「' + (s.account || s.code) + '」可重新登录。' : '停用后「' + (s.account || s.code) + '」将无法登录系统，历史数据保留。', danger: s.enabled !== false,
               onOk: async () => { await updateStore(s.id, { enabled: s.enabled === false }); toast('已' + (s.enabled === false ? '启用' : '停用')); paint(); }
-            })
-          }, s.enabled === false ? '启用' : '停用'),
-          h('button', {
-            class: 'btn btn-xs btn-ghost', onclick: () => confirmDialog({
+            })],
+            ['删除门店', () => confirmDialog({
               title: '删除门店', message: '将删除「' + s.name + '」及其全部任务完成记录，不可恢复！确定继续？', danger: true, okText: '确认删除',
               onOk: async () => { await removeStore(s.id); toast('门店已删除'); paint(); }
-            })
-          }, '删除')
-        ]))
+            }), 'danger']
+          ]
+        ))
       ]);
     });
     const tbl = h('table', { class: 'tbl' }, [
@@ -2216,22 +2397,19 @@ function pageAdmin() {
       h('td', {}, u.title),
       h('td', {}, permTags(u)),
       h('td', {}, u.enabled === false ? tagNode('已停用', 'tag-red') : tagNode('正常', 'tag-green')),
-      h('td', {}, h('div', { class: 'row', style: { gap: '6px' } }, [
+      h('td', { class: 'op-cell' }, rowActions(
         h('button', { class: 'btn btn-xs', onclick: () => openHqUserEditor(u, paint) }, '编辑 / 权限'),
-        h('button', { class: 'btn btn-xs', onclick: () => openResetPwd(u, paint) }, '重置密码'),
-        h('button', {
-          class: 'btn btn-xs', onclick: () => confirmDialog({
+        [
+          ['重置密码', () => openResetPwd(u, paint)],
+          [u.enabled === false ? '启用账号' : '停用账号', () => confirmDialog({
             title: (u.enabled === false ? '启用' : '停用') + '账号', okText: u.enabled === false ? '启用' : '停用', danger: u.enabled !== false,
             message: (u.enabled === false ? '启用后「' : '停用后「') + u.account + ' ' + u.name + '」' + (u.enabled === false ? '可重新登录。' : '将无法登录系统。'),
             onOk: async () => { await updateHqUser(u.id, { enabled: u.enabled === false }); toast('已' + (u.enabled === false ? '启用' : '停用')); paint(); }
-          })
-        }, u.enabled === false ? '启用' : '停用'),
-        h('button', {
-          class: 'btn btn-xs btn-ghost', onclick: () => confirmDialog({
+          })],
+          ['删除账号', () => confirmDialog({
             title: '删除账号', message: '将删除「' + u.name + '」的登录账号（通讯录联系人保留），确定继续？', danger: true, okText: '确认删除',
             onOk: async () => { await removeHqUser(u.id); toast('账号已删除'); paint(); }
-          })
-        }, '删除')
+          }), 'danger']
       ]))
     ]));
     const tbl = h('table', { class: 'tbl' }, [

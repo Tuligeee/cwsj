@@ -448,79 +448,133 @@ function openReopenModal(d, onDone) {
    提交通讯录页面（门店 / 管理公司共用）
    ========================================================= */
 function pageContacts() {
-  const wrap = h('div');
+  const wrap = h('div', { class: 'ct-page' });
   let kw = '';
   let deptFilter = 'all';
 
-  const search = inputNode({ placeholder: '搜索姓名 / 部门 / 负责工作 / 电话', oninput: e => { kw = e.target.value.trim(); paint(); } });
-  const toolBar = h('div', { class: 'row', style: { marginBottom: '12px', flexWrap: 'wrap', gap: '10px', alignItems: 'center' } }, [
-    h('div', { style: { width: '260px' } }, search),
-    canEditContacts() ? h('button', { class: 'btn btn-primary btn-sm m2-hide-mobile', onclick: () => openContactEditor(null, paint) }, '+ 新增联系人') : null
+  const chipsBox = h('div', { class: 'ct-chips' });
+
+  /* 搜索框：前置图标 + 清空按钮，占位文案收短 */
+  const clearBtn = h('button', {
+    class: 'ct-search-x', type: 'button', title: '清空',
+    html: iconSvg('x', 13),
+    onclick: () => {
+      searchInput.value = ''; kw = '';
+      clearBtn.classList.remove('on');
+      paint(); searchInput.focus();
+    }
+  });
+  const searchInput = inputNode({
+    placeholder: '搜索姓名或电话',
+    oninput: e => {
+      kw = e.target.value.trim();
+      clearBtn.classList.toggle('on', !!kw);
+      paint();
+    }
+  });
+  const searchBox = h('div', { class: 'ct-search' }, [
+    h('span', { class: 'ct-search-ic', html: iconSvg('search', 15) }),
+    searchInput,
+    clearBtn
   ]);
-  const deptBar = h('div', { class: 'tabs' });
   const listBox = h('div');
 
-  function deptCount(d) { return state.contacts.filter(c => c.dept === d).length; }
-  function paintBar() {
-    clear(deptBar);
-    const mk = (key, label, n) => h('div', {
-      class: 'tab' + (deptFilter === key ? ' active' : ''), onclick: () => { deptFilter = key; paint(); }
-    }, [label, n !== null ? h('span', { class: 'cnt' }, String(n)) : null]);
-    deptBar.appendChild(mk('all', '全部', state.contacts.length));
-    /* 除固定部门外，把「门店」「总部」这类来自账号同步的分组也列成 tab，否则筛不到 */
-    const extra = Array.from(new Set(state.contacts.map(c => c.dept))).filter(d => d && !state.departments.includes(d));
-    state.departments.concat(extra).forEach(d => deptBar.appendChild(mk(d, d, deptCount(d))));
+  function deptList() {
+    const extra = Array.from(new Set(state.contacts.map(x => x.dept))).filter(d => d && !state.departments.includes(d));
+    return state.departments.concat(extra).filter(d => state.contacts.some(x => x.dept === d));
   }
-  function match(c) {
-    if (deptFilter !== 'all' && c.dept !== deptFilter) return false;
+  function match(x) {
+    if (deptFilter !== 'all' && x.dept !== deptFilter) return false;
     if (!kw) return true;
-    const s = (c.name + c.dept + c.title + c.duty + c.phone + c.wechat + c.email).toLowerCase();
+    const s = (x.name + x.dept + x.title + x.duty + x.phone + x.wechat + x.email).toLowerCase();
     return s.indexOf(kw.toLowerCase()) >= 0;
   }
-  function paint() {
-    paintBar();
-    clear(listBox);
-    const hit = state.contacts.filter(match);
-    if (!hit.length) { listBox.appendChild(emptyNode('没有匹配的联系人', '🔍')); return; }
-    const byDept = {};
-    hit.forEach(c => { (byDept[c.dept] = byDept[c.dept] || []).push(c); });
-    state.departments.concat(Object.keys(byDept).filter(d => !state.departments.includes(d))).forEach(dep => {
-      if (!byDept[dep]) return;
-      const block = h('div', { class: 'dept-block' });
-      block.appendChild(h('h4', { class: 'dept-title' }, [
-        h('span', { class: 'dt-badge', text: dep }),
-        h('span', { style: { color: 'var(--text-3)', fontWeight: '400', fontSize: '12px' }, text: byDept[dep].length + ' 人' })
-      ]));
-      const grid = h('div', { class: 'contact-grid' });
-      byDept[dep].forEach(c => {
-        const color = DEPT_COLOR[c.dept] || 'var(--brand)';
-        const card = h('div', { class: 'contact-card' }, [
-          h('div', { class: 'cc-top' }, [
-            h('div', { class: 'cc-av', style: { background: color }, text: c.name.slice(0, 1) }),
-            h('div', { style: { flex: '1', minWidth: '0' } }, [
-              h('div', { class: 'cc-name' }, [
-                c.name,
-                h('span', { style: { fontWeight: '400', fontSize: '11.5px', color: 'var(--text-3)', marginLeft: '7px' }, text: c.title })
-              ]),
-              h('div', { class: 'cc-title', text: c.dept })
-            ]),
-            canEditContacts() ? h('button', { class: 'btn btn-xs', onclick: () => openContactEditor(c, paint) }, '编辑') : null
+  /* 占位文案视同为空 */
+  const real = s => {
+    const t = String(s == null ? '' : s).trim();
+    return (t === '' || t === '待补充' || t === '—' || t === '-') ? '' : t;
+  };
+
+  function paintChips() {
+    clear(chipsBox);
+    const sel = new Set(deptFilter === 'all' ? [] : [deptFilter]);
+    chipsBox.appendChild(chipFilterWithMore({
+      label: '部门', max: 6,
+      options: deptList().map(d => ({ v: d, t: d, n: state.contacts.filter(x => x.dept === d).length })),
+      selected: sel,
+      onChange: () => { deptFilter = Array.from(sel)[0] || 'all'; paint(); }
+    }).el);
+  }
+
+  function card(c) {
+    const phone = real(c.phone);
+    const duty = real(c.duty);
+    const extra = [real(c.wechat), real(c.email)].filter(Boolean).join(' · ');
+    const sub = [c.dept, extra].filter(Boolean).join(' · ');
+    return h('div', { class: 'ct-card' }, [
+      h('div', { class: 'ct-card-top' }, [
+        h('div', { class: 'ct-av', text: (c.name || '?').slice(0, 1) }),
+        h('div', { class: 'ct-idtx' }, [
+          h('div', { class: 'ct-name' }, [
+            h('span', { text: c.name }),
+            real(c.title) ? h('span', { class: 'ct-title', text: c.title }) : null
           ]),
-          h('div', { class: 'cc-duty', text: c.duty || '—' }),
-          h('div', { class: 'cc-cs' }, [
-            h('span', { onclick: () => copyText(c.phone) }, '📞 ' + c.phone),
-            c.wechat ? h('span', { onclick: () => copyText(c.wechat) }, '💬 微信：' + c.wechat) : null,
-            c.email ? h('span', { onclick: () => copyText(c.email) }, '✉ ' + c.email) : null
+          h('div', { class: 'ct-sub' }, [
+            h('span', { class: 'ct-sub-t', text: sub }),
+            phone
+              ? h('button', {
+                class: 'ct-phone', type: 'button', title: '点击复制电话',
+                onclick: () => copyText(phone)
+              }, [h('span', { class: 'ct-dot', text: '·' }),
+                  h('span', { class: 'ct-phone-ic', html: iconSvg('phone', 13) }),
+                  h('span', { text: phone })])
+              : null
           ])
-        ]);
-        grid.appendChild(card);
-      });
-      block.appendChild(grid);
-      listBox.appendChild(block);
+        ]),
+        canEditContacts()
+          ? h('button', { class: 'btn btn-xs ct-edit', onclick: () => openContactEditor(c, paint) }, '编辑')
+          : null
+      ]),
+      duty ? h('div', { class: 'ct-duty', text: duty }) : null
+    ]);
+  }
+
+  function paint() {
+    paintChips();
+    clear(listBox);
+    const deptOrder = deptList();
+    const hit = state.contacts.filter(match).slice().sort((a, b) => {
+      const ia = deptOrder.indexOf(a.dept), ib = deptOrder.indexOf(b.dept);
+      const da = ia < 0 ? 999 : ia, db = ib < 0 ? 999 : ib;
+      if (da !== db) return da - db;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN');
+    });
+    if (!hit.length) { listBox.appendChild(emptyNode('没有匹配的联系人', null, 'book')); return; }
+    const byDept = {};
+    hit.forEach(x => { (byDept[x.dept] = byDept[x.dept] || []).push(x); });
+    deptOrder.forEach(dep => {
+      if (!byDept[dep]) return;
+      const sec = h('section', { class: 'ct-sec' });
+      sec.appendChild(h('div', { class: 'ct-sec-head' }, [
+        h('h3', { class: 'ct-sec-t', text: dep }),
+        h('span', { class: 'ct-sec-n', text: byDept[dep].length + ' 人' })
+      ]));
+      const grid = h('div', { class: 'ct-grid' });
+      byDept[dep].forEach(x => grid.appendChild(card(x)));
+      sec.appendChild(grid);
+      listBox.appendChild(sec);
     });
   }
+
+  if (canEditContacts()) {
+    setPageActions([h('button', { class: 'btn btn-sm btn-primary', onclick: () => openContactEditor(null, paint) }, '+ 新增联系人')]);
+  } else {
+    setPageActions([]);
+  }
+
   paint();
-  wrap.appendChild(toolBar); wrap.appendChild(deptBar); wrap.appendChild(listBox);
+  wrap.appendChild(h('div', { class: 'ct-bar' }, [searchBox, chipsBox]));
+  wrap.appendChild(listBox);
   return wrap;
 }
 
