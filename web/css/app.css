@@ -182,6 +182,10 @@ a{color:var(--brand); text-decoration:none;}
 .user-menu .um-item.danger{color:var(--danger);}
 
 .content{flex:1;overflow:auto;padding:20px 22px 40px;}
+/* 看板页撑满时，底部留白收到 16px，避免图例下面一大块空 */
+.content:has(> .board-page){padding-bottom:16px;}
+/* 测试环境有底部横幅时，给看板多留出横幅高度，避免图例被挡 */
+body:has(#stg-banner) .content:has(> .board-page){padding-bottom:48px;}
 
 /* ================= 通用组件 ================= */
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap;}
@@ -1783,9 +1787,9 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   .flt-bare .m2-fpill-act{margin-left:auto;}
 }
 
-/* 门店端三组排成一排：整体收紧一点（2026-11-06） */
-.flt-bar{gap:8px 10px;}
-.flt-bar .flt-group{gap:6px;}
+/* 门店端三组排成一排：组间给足空隙，组内紧凑（2026-11-06） */
+.flt-bar{gap:8px 18px;}
+.flt-bar .flt-group{gap:8px;}
 .flt-bar .chip-tabs{gap:4px;}
 .flt-bar .chip-tabs .tab{padding:0 9px;}
 .flt-bar .cf-wrap{gap:5px;}
@@ -1799,3 +1803,23 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 .flt-bar .cf-chip .cf-n{font-size:10px;}
 .flt-bar .flt-gl{font-size:11.5px;}
 .flt-bar .cf-more{padding:0 7px;font-size:12px;}
+
+/* 督办看板：表格撑满剩余视口（2026-11-06） */
+@media (min-width: 721px){
+  .content:has(> .board-page){display:flex;flex-direction:column;overflow:hidden;}
+  .board-page{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
+  .board-page > div:last-child{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
+  .board-page .tbl-wrap{
+    flex:1 1 auto;min-height:0;max-height:none;
+    overflow:auto;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;
+  }
+  .board-page .board-legend{flex:0 0 auto;margin-top:10px;}
+}
+
+/* 看板表格撑满后，行高自动分配，最后一行下方不再留白带 */
+@media (min-width: 721px){
+  .board-page .tbl-wrap > .matrix{height:100%;}
+  .board-page .matrix tbody tr{height:auto;}
+  .board-page .matrix tbody td{vertical-align:middle;}
+}

@@ -904,7 +904,7 @@ function openTaskForm(task, onDone, opts) {
    ========================================================= */
 let _boardFilter = { dept: new Set(), cycle: new Set(), status: new Set(), onlyProblem: false };
 function pageHqBoard() {
-  const wrap = h('div');
+  const wrap = h('div', { class: 'board-page' });
   const filterBox = h('div', { class: M2() ? 'flt-bare' : 'flt' });
   const boardBox = h('div');
 
@@ -993,8 +993,8 @@ function pageHqBoard() {
       tbody.appendChild(tr);
     });
     const table = h('table', { class: 'matrix tbl' }, [thead, tbody]);
-    boardBox.appendChild(h('div', { class: 'tbl-wrap', style: { maxHeight: 'calc(100vh - 300px)' } }, table));
-    boardBox.appendChild(h('div', { class: 'row mt10' }, [
+    boardBox.appendChild(h('div', { class: 'tbl-wrap' }, table));
+    boardBox.appendChild(h('div', { class: 'row mt10 board-legend' }, [
       h('span', { class: 'bm-legend', text: '图例' }),
       ...['done', 'late', 'due', 'overdue', 'normal'].map(k => h('span', { class: 'row', style: { gap: '4px' } }, [
         h('span', { class: 'cell legend-sw ' + k }),

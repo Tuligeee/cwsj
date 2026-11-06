@@ -698,6 +698,7 @@ function pageStoreTasks() {
       class: 'cf-chip' + (onceOn ? ' on' : ''), type: 'button',
       onclick: () => { cycleFilter = onceOn ? 'all' : 'once'; filterSet.clear(); paint(); }
     }, [h('span', { text: '专项' }), h('span', { class: 'cf-n', text: String(onceItems().length) })]));
+    bar.appendChild(h('span', { class: 'flt-sep' }));
     bar.appendChild(h('div', { class: 'flt-group' }, [
       h('span', { class: 'flt-gl', text: '周期' }), cycWrap
     ]));
@@ -713,6 +714,7 @@ function pageStoreTasks() {
         selected: creatorSet, onChange: () => paint()
       }).el
       : h('span', { class: 'flt-hint', text: '暂无任务' });
+    bar.appendChild(h('span', { class: 'flt-sep' }));
     bar.appendChild(h('div', { class: 'flt-group' }, [
       h('span', { class: 'flt-gl', text: '发布人' }), cWrap
     ]));
