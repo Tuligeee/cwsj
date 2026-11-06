@@ -543,7 +543,9 @@ function barChart(items, opt) {
     const p = max ? clamp((v / max) * 100, 0, 100) : 0;
     wrap.appendChild(h('div', { class: 'bar-row' }, [
       h('div', { class: 'bar-name', title: it.name, text: it.name }),
-      h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: p + '%', background: it.color || 'var(--brand)' } })),
+      h('div', { class: 'bar-track' }, p > 0
+        ? h('div', { class: 'bar-fill', style: { width: p + '%', background: it.color || 'var(--brand)' } })
+        : null),
       h('div', { class: 'bar-val', text: it.text !== undefined ? it.text : String(v) })
     ]));
   });

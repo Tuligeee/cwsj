@@ -1344,7 +1344,8 @@ function pageHqStats() {
 
   function paintStore() {
     const ov = companyOverview(rangeDays(), rangeEnd());
-    const rank = ov.rows.slice().sort((a, b) => b.rate - a.rate);
+    /* 只列本期有任务实例的门店：应完成 = 0 的直接不出现 */
+    const rank = ov.rows.filter(r => r.expected > 0).sort((a, b) => b.rate - a.rate);
     const acfg = getAssessCfg();
     const scores = {};
     rank.forEach(r => { scores[r.storeId] = storeAssessScore(r, acfg); });
@@ -1371,16 +1372,16 @@ function pageHqStats() {
     ]));
     body.appendChild(h('div', { class: 'card mt14' }, [
       h('div', { class: 'card-head' }, [h('div', {}, [h('h3', {}, '各门店完成率排名'), h('div', { class: 'cd', text: rangeText() + ' · ' + rangeDays() + ' 天 · 用于门店考核' })])]),
-      h('div', { class: 'card-body' }, rank.every(r => !r.rate) ? h('div', { class: 'st-empty' }, [
+      h('div', { class: 'card-body' }, !rank.length ? h('div', { class: 'st-empty' }, [
         h('span', { class: 'st-empty-ic', html: iconSvg('chart', 16) }),
         h('span', { class: 'st-empty-t', text: '本期还没有门店完成记录' }),
         h('span', { class: 'st-empty-s', text: '有提交后这里会按完成率排序' })
-      ]) : barChart(rank.map((r, i) => ({
+      ]) : barChart(rank.map(r => ({
         name: r.store.name,
         value: r.rate,
         text: r.rate.toFixed(1) + '%　(' + r.done + '/' + r.expected + ')',
-        /* 颜色不编码数值：全部中性，只有最后一名用红 */
-        color: i === rank.length - 1 ? 'var(--danger)' : 'var(--text-3)'
+        /* 三档：达标绿 / 正常蓝 / 偏低琥珀 */
+        color: r.rate >= 90 ? 'var(--ok)' : r.rate >= 60 ? 'var(--brand)' : 'var(--warn)'
       })), { max: 100 }))
     ]));
     const grid = h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }, class: 'mt14' });
