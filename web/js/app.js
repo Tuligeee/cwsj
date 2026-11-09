@@ -127,8 +127,14 @@ function applyDeepLink() {
   const attr = kind === 'task' ? 'taskId' : 'demandId';
   const sel = kind === 'task' ? '[data-task-id]' : '[data-demand-id]';
   let tries = 0;
+  let switched = false;
   const tick = () => {
-    const el = Array.prototype.slice.call(document.querySelectorAll(sel)).find(n => n.dataset[attr] === id);
+    let el = Array.prototype.slice.call(document.querySelectorAll(sel)).find(n => n.dataset[attr] === id);
+    /* 卡片不在当前周期筛选里（例如月度任务在「本月」而默认看「今日」）→ 切到「全部」再找 */
+    if (!el && storeSide && !switched && tries >= 2 && typeof window.__storeSetPeriod === 'function') {
+      switched = true;
+      try { window.__storeSetPeriod('all'); } catch (e) {}
+    }
     if (el) {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el.classList.add('deep-hit');

@@ -82,6 +82,27 @@ const fmt = (d) => d ? (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + pad(d
 const fmtDate = (d) => d ? (d.getMonth() + 1) + '月' + d.getDate() + '日' : '—';
 
 /* 当前周期：返回 {key, due} */
+/* ---------- 期间键（必须与前端 occKey 完全一致，2026-11-09 修复） ----------
+   前端记录的 periodKey：daily=yyyy-MM-dd / weekly=yyyy-Www / monthly=yyyy-MM / once='once'
+   而这里原来一律用 ymd(due) 去查记录，导致周/月/专项任务永远查不到提交记录，
+   每天都在发「任务已逾期 / 任务仍未提交」——508 条 A3/A4 里 282 条是误发。 */
+function pad2(v) { return String(v).padStart(2, '0'); }
+function weekKey(d) {
+  const x = startOfDay(d);
+  const t = new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7));
+  const w1 = new Date(t.getFullYear(), 0, 4);
+  const no = 1 + Math.round(((t - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7);
+  return t.getFullYear() + '-W' + pad2(no);
+}
+function monthKey(d) { const x = new Date(d); return x.getFullYear() + '-' + pad2(x.getMonth() + 1); }
+function periodKeyOf(task, due) {
+  if (task.cycle === 'daily') return ymd(due);
+  if (task.cycle === 'weekly') return weekKey(due);
+  if (task.cycle === 'monthly') return monthKey(due);
+  return 'once';
+}
+
 function occurrence(task, now) {
   const t = startOfDay(now);
   if (task.cycle === 'daily') return { key: ymd(t), due: atTime(t, task.time) };
@@ -231,7 +252,9 @@ function build(now) {
     (task.storeIds || []).forEach(storeId => {
       const store = (state.stores || []).find(s => s.id === storeId);
       if (!store) return;
-      const rec = records.find(r => r.taskId === task.id && r.storeId === storeId && r.periodKey === occ.key);
+      /* 期间键与前端一致（daily=日期 / weekly=yyyy-Www / monthly=yyyy-MM / once='once'） */
+      const occPk = periodKeyOf(task, occ.due);
+      const rec = records.find(r => r.taskId === task.id && r.storeId === storeId && r.periodKey === occPk);
       const staff = dingOf(storeId);
       if (!staff) return;
       /* 本期是否已生效：到期日早于生效日 → 本期不适用，不发临期/逾期/催办 */
@@ -309,7 +332,7 @@ function build(now) {
             }
           }
         }
-      } else if (rec.doneAt && task.creatorId) {
+      } else if (rec.doneAt && task.creatorId && (now - new Date(rec.doneAt)) < 24 * 3600000) {
         /* A5 门店已提交 → 通知任务创建人 */
         const creator = (state.hq || []).find(h => h.id === task.creatorId);
         const cd = creator ? hqDing(creator) : dingOf(task.creatorId);

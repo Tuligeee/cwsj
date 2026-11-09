@@ -637,6 +637,14 @@ function pageStoreTasks() {
   const creatorSet = new Set();   // 发布人多选（空 = 全部）
   let period = 'today';           // today | week | month | all（周期筛选，不再拆成 4 个页面）
   let cycleFilter = 'all';        // all | daily | weekly | monthly | once（专项任务并入本页）
+  /* 深链接兜底：外部可切到指定周期，避免「卡片在别的周期桶里 → 点消息什么也没发生」
+     （2026-11-09：月度任务默认在「本月」，从消息点进来落在「今日」就找不到卡片） */
+  window.__storeSetPeriod = function (p) {
+    if (['today', 'week', 'month', 'all'].indexOf(p) < 0) return;
+    if (period === p) return;
+    period = p;
+    try { paint(); } catch (e) {}
+  };
 
   const periodBar = h('div', { class: 'tabs period-tabs' });
   const filterBar = h('div', { style: { marginBottom: '10px' } });
