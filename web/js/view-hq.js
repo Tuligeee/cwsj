@@ -888,8 +888,10 @@ function openTaskForm(task, onDone, opts) {
             saveState();
             toast('任务已更新', 'ok');
           } else {
-            createTask(payload);
-            toast('任务已下发到 ' + storeIds.length + ' 家门店', 'ok');
+            const nt = createTask(payload);
+            const shifted = nt && nt.startDate && nt.startDate > ymd(new Date());
+            toast('任务已下发到 ' + storeIds.length + ' 家门店' +
+              (shifted ? '（今天这点已过，首期从 ' + nt.startDate + ' 开始）' : ''), 'ok');
           }
           inst.close();
           onDone && onDone();

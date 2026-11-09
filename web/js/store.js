@@ -503,12 +503,57 @@ function companyOverview(days, now) {
 /* =========================================================
    任务写操作
    ========================================================= */
+/* ---------- 首期到期时刻与生效日顺延（2026-11-09） ----------
+   新建周期任务时，如果"第一期"的截止时刻已经过了（或不足 15 分钟），
+   就把生效日顺延到明天。否则会出现"下午建一条 06:00 的每日任务，
+   当天立刻算逾期未交、并马上收到『任务已逾期』通知"的问题。 */
+function firstDueFrom(task, sd) {
+  const parts = String(task.time || '23:59').split(':');
+  const hh = Number(parts[0]) || 0, mm = Number(parts[1]) || 0;
+  const base = new Date((sd || ymd(new Date())) + 'T00:00:00');
+  if (task.cycle === 'daily') {
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm, 0);
+  }
+  if (task.cycle === 'weekly') {
+    const wd = Number(task.weekday) || 7;                 // 1=周一 … 7=周日
+    const baseWd = base.getDay() === 0 ? 7 : base.getDay();
+    const ahead = (wd - baseWd + 7) % 7;
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate() + ahead, hh, mm, 0);
+  }
+  if (task.cycle === 'monthly') {
+    const want = Number(task.monthDay) || 1;
+    const last = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+    let d1 = new Date(base.getFullYear(), base.getMonth(), Math.min(want, last), hh, mm, 0);
+    if (d1.getTime() < base.getTime()) {
+      const last2 = new Date(base.getFullYear(), base.getMonth() + 2, 0).getDate();
+      d1 = new Date(base.getFullYear(), base.getMonth() + 1, Math.min(want, last2), hh, mm, 0);
+    }
+    return d1;
+  }
+  return task.deadline ? new Date(task.deadline) : null;    // once
+}
+function autoStartDate(task) {
+  if (!task) return task;
+  const sd = task.startDate || ymd(new Date());
+  if (task.cycle === 'once') return sd;
+  const first = firstDueFrom(task, sd);
+  if (!first) return sd;
+  const BUFFER = 15 * 60000;                                // 不足 15 分钟也算来不及
+  if (first.getTime() - Date.now() < BUFFER) {
+    const now = new Date();
+    return ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  }
+  return sd;
+}
+
 function createTask(data) {
   const t = Object.assign({
     id: uid('T'), images: [], links: [], remindBeforeMin: 120, remindOverdue: true,
     startDate: ymd(new Date()), stopDate: null, status: 'active',
     creatorId: me.id, creatorName: me.name, createdAt: new Date().toISOString()
   }, data);
+  /* 首期已过 → 生效日顺延到明天（改历史数据不受影响：编辑走的是 Object.assign，不走这里） */
+  t.startDate = autoStartDate(t);
   state.tasks.unshift(t);
   if (window.__TASK_API__) { taskApi('POST', '/api/tasks', { task: t }); return t; }
   saveState();
