@@ -2157,3 +2157,36 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 
 /* 发送记录：时间 / 状态 两组选择器之间留空隙（2026-11-06） */
 .nlog-sep{display:inline-block;width:1px;height:16px;background:var(--line);margin:0 10px;flex:0 0 auto;}
+
+/* ===== 门店提交记录（2026-11-09） ===== */
+.rec-state.ok{color:var(--ok-tx);}
+.rec-state.miss{color:var(--danger-tx);}
+.rec-hist{display:flex;flex-direction:column;gap:2px;}
+.rec-item{border-bottom:1px solid var(--line);}
+.rec-item:last-child{border-bottom:0;}
+.rec-row{display:flex;align-items:center;gap:12px;padding:7px 6px;line-height:1.35;border-radius:6px;}
+.rec-item:hover .rec-row{background:var(--panel-2);}
+.rec-l{width:158px;flex:0 0 auto;display:flex;align-items:baseline;gap:7px;}
+.rec-d{font-size:12.5px;color:var(--text);font-variant-numeric:tabular-nums;}
+.rec-c{font-size:11px;color:var(--text-3);}
+.rec-m{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:8px;}
+.rec-s{flex:0 0 auto;font-size:12px;padding:1px 7px;border-radius:5px;line-height:18px;}
+.rec-s.is-ok{color:var(--ok-tx);background:rgba(15,157,88,.09);}
+.rec-s.is-late{color:var(--warn-tx);background:rgba(201,138,0,.10);}
+.rec-s.is-miss{color:var(--text-3);background:var(--panel-3);}
+.rec-s.is-wait{color:var(--text-3);background:var(--panel-3);}
+.rec-x{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rec-item.rec-miss .rec-x{color:var(--text-3);}
+.rec-thumbs{display:flex;gap:4px;flex:0 0 auto;}
+.rec-thumb{width:26px;height:26px;object-fit:cover;border-radius:4px;border:1px solid var(--line);cursor:zoom-in;}
+.rec-more-n{font-size:11px;color:var(--text-3);align-self:center;}
+.rec-r{flex:0 0 auto;width:104px;text-align:right;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.rec-full{padding:2px 2px 12px;}
+.rec-full-t{font-size:13px;color:var(--text-2);line-height:1.6;white-space:pre-wrap;margin-bottom:8px;}
+@media (max-width:720px){
+  .rec-row{flex-wrap:wrap;gap:6px 10px;}
+  .rec-l{width:auto;}
+  .rec-m{flex:1 1 100%;order:3;}
+  .rec-r{width:auto;margin-left:auto;}
+  .rec-x{white-space:normal;}
+}

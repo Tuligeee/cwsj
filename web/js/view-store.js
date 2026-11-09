@@ -166,6 +166,8 @@ function openDoneModal(item, onDone) {
 /* ---------------- 任务详情 ---------------- */
 function openTaskDetail(item, opts) {
   const t = item.task;
+  /* 门店端：只看自己 —— 顶部本期状态，底部我的提交记录；总部端：保持原来的受派门店明细 */
+  if (isStore()) return openStoreTaskDetail(t, item);
   const p = taskProgress(t);
   const st = t.storeIds.map(sid => {
     const i = p.cells.find(c => c.storeId === sid);
@@ -194,6 +196,124 @@ function openTaskDetail(item, opts) {
   ]);
   openModal({ title: '任务详情', sub: t.title, wide: true, body: body, footer: [h('button', { class: 'btn', onclick: () => closeTopModal() }, '关闭')] });
 }
+
+/* ================= 门店端任务详情（2026-11-09） =================
+   门店只关心「这一期我要不要交、我交了没」，以及「我前几期交了什么」。
+   所以顶部去掉「x / 6 家完成」这类跨店信息，底部把「受派门店明细」换成自己的提交记录。 */
+function storeTaskHistory(task, days) {
+  const now = new Date();
+  const from = addDays(startOfDay(now), -(days - 1));
+  const out = [];
+  const push = (due) => {
+    const key = occKey(task, due);
+    const rec = getRecord(task.id, me.id, key);
+    const st = occStatus(due, task, rec, now);
+    out.push({ due: due, key: key, rec: rec, status: st, missed: !rec && due.getTime() < now.getTime() });
+  };
+  if (task.cycle === 'once') {
+    if (!task.deadline) return out;
+    const due = new Date(task.deadline);
+    if (due.getTime() >= from.getTime()) push(due);
+    return out;
+  }
+  for (let i = 0; i < days; i++) {
+    const day = addDays(from, i);
+    if (!taskActiveOn(task, day)) continue;
+    const due = occDue(task, day);
+    if (ymd(due) !== ymd(day)) continue;          /* 只在"本期到期那天"记一行，避免重复 */
+    if (due.getTime() > now.getTime() && !getRecord(task.id, me.id, occKey(task, day))) continue;  /* 还没到的那期不算 */
+    push(due);
+  }
+  return out.sort((a, b) => b.due - a.due);
+}
+
+function openStoreTaskDetail(t, item) {
+  /* ---- 本期（卡片带过来的那一期）真实状态，不用跨店统计 ---- */
+  const curDue = item && item.due ? new Date(item.due) : occDue(t, new Date());
+  const curKey = item && item.key ? item.key : occKey(t, new Date());
+  const curRec = getRecord(t.id, me.id, curKey);
+  const curStatus = occStatus(curDue, t, curRec, new Date());
+  const curMeta = STATUS_META[curStatus] || STATUS_META.normal;
+
+  const histBox = h('div', { class: 'rec-hist' });
+  let histDays = 30;
+
+  function paintHist() {
+    clear(histBox);
+    const rows = storeTaskHistory(t, histDays);
+    if (!rows.length) {
+      histBox.appendChild(emptyNode('这个任务还没有需要提交的期次', null, 'checklist'));
+      return;
+    }
+    rows.forEach(r => {
+      const item2 = h('div', { class: 'rec-item' + (r.rec ? '' : ' rec-miss') });
+      const imgs = (r.rec && r.rec.images) ? r.rec.images : [];
+      const thumbs = h('div', { class: 'rec-thumbs' });
+      imgs.slice(0, 3).forEach(src => thumbs.appendChild(h('img', { class: 'rec-thumb', src: src, onclick: (ev) => { ev.stopPropagation(); lightbox(src); } })));
+      if (imgs.length > 3) thumbs.appendChild(h('span', { class: 'rec-more-n', text: '+' + (imgs.length - 3) }));
+
+      const row = h('div', { class: 'rec-row' }, [
+        h('div', { class: 'rec-l' }, [
+          h('div', { class: 'rec-d', text: ymd(r.due) }),
+          h('div', { class: 'rec-c', text: CYCLE_LABEL[t.cycle] })
+        ]),
+        h('div', { class: 'rec-m' }, [
+          h('span', { class: 'rec-s ' + (r.rec ? (r.rec.late ? 'is-late' : 'is-ok') : (r.missed ? 'is-miss' : 'is-wait')),
+            text: r.rec ? (r.rec.late ? '逾期提交' : '按时提交') : (r.missed ? '未提交' : '待提交') }),
+          h('span', { class: 'rec-x', text: r.rec ? (String(r.rec.text || '').split('\n')[0] || '—') : '—' }),
+          thumbs
+        ]),
+        h('div', { class: 'rec-r', text: r.rec ? ymdhm(r.rec.doneAt) : '—' })
+      ]);
+
+      if (r.rec) {
+        const more = h('div', { class: 'rec-full' }, [
+          h('div', { class: 'rec-full-t', text: r.rec.text || '（无说明）' }),
+          thumbsNode(r.rec.images),
+          linksNode(r.rec.links)
+        ]);
+        more.style.display = 'none';
+        row.style.cursor = 'pointer';
+        row.onclick = (ev) => { if (ev.target.closest('a,img')) return; more.style.display = more.style.display === 'none' ? '' : 'none'; };
+        item2.appendChild(row);
+        item2.appendChild(more);
+      } else {
+        item2.appendChild(row);
+      }
+      histBox.appendChild(item2);
+    });
+
+    /* 更早的记录（最多回溯 90 天） */
+    const all = storeTaskHistory(t, 90);
+    if (histDays < 90 && all.length > rows.length) {
+      histBox.appendChild(h('button', {
+        class: 'btn btn-sm mt10', onclick: () => { histDays = 90; paintHist(); }
+      }, '显示更早（' + (all.length - rows.length) + ' 条）'));
+    }
+  }
+  paintHist();
+
+  const body = h('div', {}, [
+    h('dl', { class: 'dl' }, [
+      h('dt', {}, '任务类型'), h('dd', {}, tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle])),
+      h('dt', {}, '截止规则'), h('dd', {}, cycleDesc(t)),
+      h('dt', {}, '发布部门'), h('dd', {}, t.dept + ' · ' + t.creatorName),
+      h('dt', {}, '本期状态'), h('dd', {}, h('span', { class: 'row' }, [
+        tagNode(curMeta.label, curMeta.tag),
+        h('span', { class: 'fhint', style: { margin: '0' }, text: '本期截止 ' + ymdhm(curDue) })
+      ])),
+      h('dt', {}, '我提交了没'), h('dd', {}, curRec
+        ? h('span', { class: 'rec-state ok', text: '已提交 · ' + ymdhm(curRec.doneAt) + (curRec.late ? ' · 逾期提交' : ' · 按时提交') })
+        : h('span', { class: 'rec-state miss', text: curStatus === 'overdue' ? '还没提交（已逾期）' : '还没提交' })),
+      h('dt', {}, '提醒规则'), h('dd', {}, desclineText(t))
+    ]),
+    t.content ? h('div', { class: 'mt14' }, [h('div', { class: 'fhint', style: { margin: '0 0 6px' }, text: '任务说明' }), h('div', { class: 'tc-body', style: { marginTop: '0' }, text: t.content })]) : null,
+    thumbsNode(t.images), linksNode(t.links),
+    h('div', { class: 'sub-group' }, [h('h4', {}, '我的提交记录'), histBox])
+  ]);
+  openModal({ title: '任务详情', sub: t.title, wide: true, body: body, footer: [h('button', { class: 'btn', onclick: () => closeTopModal() }, '关闭')] });
+}
+
 function desclineText(t) {
   const r = t.remindBeforeMin;
   const a = r > 0 ? '到期前 ' + dur(r * 60000) + ' 提醒' : '不提前提醒';
