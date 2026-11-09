@@ -2190,3 +2190,11 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   .rec-r{width:auto;margin-left:auto;}
   .rec-x{white-space:normal;}
 }
+
+/* ===== 门店明细可点（2026-11-09） ===== */
+.tbl tr.clickable{cursor:pointer;}
+.tbl tr.clickable:hover td{background:var(--panel-2);}
+.rec-go{color:var(--brand);font-size:12px;white-space:nowrap;}
+
+/* ===== 弹窗叠层（2026-11-09）：第二层遮罩只轻微加深，避免两层 50% 叠成一片黑 ===== */
+.modal-mask.nested{background:rgba(12,16,26,.22);backdrop-filter:blur(1px);}

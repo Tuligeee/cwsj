@@ -45,7 +45,12 @@ function openModal(opt) {
     },
     setTitle: t => { box.querySelector('h3').textContent = t; }
   };
-  if (_modalStack.length) box.style.filter = 'saturate(.5) opacity(.85)';
+  /* 2026-11-09：原实现把滤镜加在新弹窗上（反了），叠层时新窗口反而发虚。
+     正确做法：压暗下面那一层，新弹窗保持清晰。 */
+  if (_modalStack.length) {
+    _modalStack[_modalStack.length - 1].box.style.filter = 'saturate(.65) opacity(.9)';
+    mask.classList.add('nested');
+  }
   _modalStack.push(inst);
   return inst;
 }

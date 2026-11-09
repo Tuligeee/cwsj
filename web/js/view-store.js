@@ -171,7 +171,7 @@ function openTaskDetail(item, opts) {
   const p = taskProgress(t);
   const st = t.storeIds.map(sid => {
     const i = p.cells.find(c => c.storeId === sid);
-    return { store: getStore(sid), status: i ? i.status : 'na' };
+    return { store: getStore(sid), status: i ? i.status : 'na', cell: i || null };
   });
   const body = h('div', {}, [
     h('dl', { class: 'dl' }, [
@@ -191,7 +191,8 @@ function openTaskDetail(item, opts) {
     t.content ? h('div', { class: 'mt14' }, [h('div', { class: 'fhint', style: { margin: '0 0 6px' }, text: '任务说明' }), h('div', { class: 'tc-body', style: { marginTop: '0' }, text: t.content })]) : null,
     thumbsNode(t.images), linksNode(t.links),
     h('div', { class: 'sub-group' }, [h('h4', {}, '受派门店明细'),
-      h('div', { class: 'tbl-wrap', style: { maxHeight: '280px' } }, buildStoreStatusTable(st))
+      h('div', { class: 'tbl-wrap', style: { maxHeight: '280px' } }, buildStoreStatusTable(st, t)),
+      h('div', { class: 'fhint mt10', style: { margin: '8px 0 0' }, text: '点门店可查看该店在这条任务上的提交记录' })
     ])
   ]);
   openModal({ title: '任务详情', sub: t.title, wide: true, body: body, footer: [h('button', { class: 'btn', onclick: () => closeTopModal() }, '关闭')] });
@@ -200,13 +201,14 @@ function openTaskDetail(item, opts) {
 /* ================= 门店端任务详情（2026-11-09） =================
    门店只关心「这一期我要不要交、我交了没」，以及「我前几期交了什么」。
    所以顶部去掉「x / 6 家完成」这类跨店信息，底部把「受派门店明细」换成自己的提交记录。 */
-function storeTaskHistory(task, days) {
+function storeTaskHistory(task, days, storeId) {
   const now = new Date();
+  const sid = storeId || me.id;
   const from = addDays(startOfDay(now), -(days - 1));
   const out = [];
   const push = (due) => {
     const key = occKey(task, due);
-    const rec = getRecord(task.id, me.id, key);
+    const rec = getRecord(task.id, sid, key);
     const st = occStatus(due, task, rec, now);
     out.push({ due: due, key: key, rec: rec, status: st, missed: !rec && due.getTime() < now.getTime() });
   };
@@ -221,17 +223,22 @@ function storeTaskHistory(task, days) {
     if (!taskActiveOn(task, day)) continue;
     const due = occDue(task, day);
     if (ymd(due) !== ymd(day)) continue;          /* 只在"本期到期那天"记一行，避免重复 */
-    if (due.getTime() > now.getTime() && !getRecord(task.id, me.id, occKey(task, day))) continue;  /* 还没到的那期不算 */
+    if (due.getTime() > now.getTime() && !getRecord(task.id, sid, occKey(task, day))) continue;  /* 还没到的那期不算 */
     push(due);
   }
   return out.sort((a, b) => b.due - a.due);
 }
 
-function openStoreTaskDetail(t, item) {
+function openStoreTaskDetail(t, item, opt) {
+  opt = opt || {};
+  const sid = opt.storeId || me.id;
+  const self = sid === me.id && isStore();
+  const storeObj = getStore(sid);
+  const storeName = storeObj ? storeObj.name : sid;
   /* ---- 本期（卡片带过来的那一期）真实状态，不用跨店统计 ---- */
   const curDue = item && item.due ? new Date(item.due) : occDue(t, new Date());
   const curKey = item && item.key ? item.key : occKey(t, new Date());
-  const curRec = getRecord(t.id, me.id, curKey);
+  const curRec = getRecord(t.id, sid, curKey);
   const curStatus = occStatus(curDue, t, curRec, new Date());
   const curMeta = STATUS_META[curStatus] || STATUS_META.normal;
 
@@ -240,7 +247,7 @@ function openStoreTaskDetail(t, item) {
 
   function paintHist() {
     clear(histBox);
-    const rows = storeTaskHistory(t, histDays);
+    const rows = storeTaskHistory(t, histDays, sid);
     if (!rows.length) {
       histBox.appendChild(emptyNode('这个任务还没有需要提交的期次', null, 'checklist'));
       return;
@@ -284,7 +291,7 @@ function openStoreTaskDetail(t, item) {
     });
 
     /* 更早的记录（最多回溯 90 天） */
-    const all = storeTaskHistory(t, 90);
+    const all = storeTaskHistory(t, 90, sid);
     if (histDays < 90 && all.length > rows.length) {
       histBox.appendChild(h('button', {
         class: 'btn btn-sm mt10', onclick: () => { histDays = 90; paintHist(); }
@@ -302,16 +309,16 @@ function openStoreTaskDetail(t, item) {
         tagNode(curMeta.label, curMeta.tag),
         h('span', { class: 'fhint', style: { margin: '0' }, text: '本期截止 ' + ymdhm(curDue) })
       ])),
-      h('dt', {}, '我提交了没'), h('dd', {}, curRec
+      h('dt', {}, self ? '我提交了没' : '门店提交了没'), h('dd', {}, curRec
         ? h('span', { class: 'rec-state ok', text: '已提交 · ' + ymdhm(curRec.doneAt) + (curRec.late ? ' · 逾期提交' : ' · 按时提交') })
         : h('span', { class: 'rec-state miss', text: curStatus === 'overdue' ? '还没提交（已逾期）' : '还没提交' })),
       h('dt', {}, '提醒规则'), h('dd', {}, desclineText(t))
     ]),
     t.content ? h('div', { class: 'mt14' }, [h('div', { class: 'fhint', style: { margin: '0 0 6px' }, text: '任务说明' }), h('div', { class: 'tc-body', style: { marginTop: '0' }, text: t.content })]) : null,
     thumbsNode(t.images), linksNode(t.links),
-    h('div', { class: 'sub-group' }, [h('h4', {}, '我的提交记录'), histBox])
+    h('div', { class: 'sub-group' }, [h('h4', {}, self ? '我的提交记录' : '提交记录'), histBox])
   ]);
-  openModal({ title: '任务详情', sub: t.title, wide: true, body: body, footer: [h('button', { class: 'btn', onclick: () => closeTopModal() }, '关闭')] });
+  openModal({ title: self ? '任务详情' : '门店任务详情', sub: self ? t.title : (t.title + ' · ' + storeName), wide: true, body: body, footer: [h('button', { class: 'btn', onclick: () => closeTopModal() }, '关闭')] });
 }
 
 function desclineText(t) {
@@ -319,18 +326,27 @@ function desclineText(t) {
   const a = r > 0 ? '到期前 ' + dur(r * 60000) + ' 提醒' : '不提前提醒';
   return a + (t.remindOverdue ? '；过期未完成持续提醒' : '；过期不提醒');
 }
-function buildStoreStatusTable(st) {
+function buildStoreStatusTable(st, task) {
   const tb = h('tbody');
   st.forEach(x => {
     const m = STATUS_META[x.status] || STATUS_META.normal;
-    tb.appendChild(h('tr', {}, [
+    const cell = x.cell || null;
+    const tr = h('tr', { class: task ? 'clickable' : '' }, [
       h('td', {}, x.store ? x.store.name : '—'),
       h('td', {}, x.store ? x.store.mgr : '—'),
-      h('td', {}, tagNode(m.label, m.tag))
-    ]));
+      h('td', {}, tagNode(m.label, m.tag)),
+      task ? h('td', { class: 'rec-go' }, '看提交记录 ›') : null
+    ]);
+    /* 2026-11-09：点门店 → 弹出该门店在这条任务上的提交记录 */
+    if (task && x.store) {
+      tr.onclick = () => openStoreTaskDetail(task, cell ? {
+        due: cell.due, key: cell.key, rec: cell.rec, status: cell.status
+      } : {}, { storeId: x.store.id });
+    }
+    tb.appendChild(tr);
   });
   return h('table', { class: 'tbl' }, [
-    h('thead', {}, h('tr', {}, [h('th', {}, '门店'), h('th', {}, '店长'), h('th', {}, '本期状态')])),
+    h('thead', {}, h('tr', {}, [h('th', {}, '门店'), h('th', {}, '店长'), h('th', {}, '本期状态'), task ? h('th', {}, '') : null].filter(Boolean))),
     tb
   ]);
 }
