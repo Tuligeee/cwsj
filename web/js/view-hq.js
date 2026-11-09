@@ -1444,7 +1444,7 @@ function pageHqStats() {
             href: 'javascript:void(0)', style: { fontWeight: '600', color: sc.pass ? 'var(--ok-tx)' : 'var(--danger-tx)' },
             onclick: () => openScoreDetail(r.store.name, sc, acfg)
           }, sc.total.toFixed(1))),
-          h('td', {}, h('span', { class: 'st-grade ' + (sc.pass ? 'pass' : 'fail'), text: grade(r) }))
+          h('td', {}, h('span', { class: 'st-grade ' + (sc.pass ? 'pass' : 'fail'), text: sc.pass ? '合格' : '不合格' }))
         ]);
       }))
     ]);
@@ -1574,17 +1574,6 @@ function pageHqStats() {
     body.appendChild(h('div', { class: 'sub-group' }, [h('h4', {}, '部门发布明细'), h('div', { class: 'tbl-wrap' }, tbl)]));
   }
 
-  function grade(r) {
-    if (r.expected < 5) return '样本不足';
-    if (r.rate >= 95 && r.ontimeRate >= 90) return '优秀';
-    if (r.rate >= 85) return '合格';
-    if (r.rate >= 70) return '待改进';
-    return '不合格';
-  }
-  function gradeCls(r) {
-    const g = grade(r);
-    return g === '优秀' ? 'tag-green' : g === '合格' ? 'tag-blue' : g === '待改进' ? 'tag-yellow' : g === '不合格' ? 'tag-red' : 'tag-gray';
-  }
 
   const rangeBtn = h('button', {
     class: 'btn btn-sm dr-trigger', type: 'button', title: '选择统计区间',
