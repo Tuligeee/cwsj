@@ -286,14 +286,17 @@ function pendingOccurrences(storeId, aheadDays, now) {
 }
 
 /* ---------------- 任务进度（管理公司视角） ---------------- */
-function taskProgress(task, now) {
+function taskProgress(task, now, asOf) {
   const nowD = now ? new Date(now) : new Date();
+  /* asOf：还原"截至某一刻"的状态。看历史某天时，那天之后才提交的记录应视为未交（2026-11-11） */
+  const cut = asOf ? new Date(asOf) : nowD;
   const res = { expected: 0, done: 0, lateDone: 0, overdue: 0, dueSoon: 0, rate: 0, cells: [] };
   task.storeIds.forEach(sid => {
     if (task.status === 'active' && !taskActiveOn(task, nowD)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
     const due = occDue(task, nowD);
     const key = occKey(task, nowD);
-    const rec = getRecord(task.id, sid, key);
+    const rec0 = getRecord(task.id, sid, key);
+    const rec = (rec0 && new Date(rec0.doneAt).getTime() > cut.getTime()) ? null : rec0;
     const st = occStatus(due, task, rec, nowD);
     res.cells.push({ storeId: sid, status: st, due: due, key: key, rec: rec });
     res.expected++;

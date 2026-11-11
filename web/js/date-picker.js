@@ -251,7 +251,8 @@
       renderCalendar(cal);
     }
     if (inp.type !== 'date') renderTime(panel);
-    renderQuick(panel);
+    /* 2026-11-11：看板等场景只允许选过去，快捷项「明天/三天后/一周后」没意义，可用 data-dp-quick="none" 关掉 */
+    if (input.getAttribute('data-dp-quick') !== 'none') renderQuick(panel);
 
     document.body.appendChild(panel);
 

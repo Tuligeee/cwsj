@@ -274,6 +274,13 @@ function openMultiPop(cfg, anchor) {
         class: 'msel-opt' + (on ? ' on' : ''), type: 'button',
         onclick: (e) => {
           e.stopPropagation();
+          if (cfg.single) {              /* 单选：选中即替换并收起（2026-11-11） */
+            cfg.selected.clear();
+            cfg.selected.add(o.v);
+            cfg.onChange && cfg.onChange();
+            close();
+            return;
+          }
           on ? cfg.selected.delete(o.v) : cfg.selected.add(o.v);
           cfg.onChange && cfg.onChange();
           body.replaceChild(listNode(), body.firstChild);
@@ -296,7 +303,7 @@ function openMultiPop(cfg, anchor) {
     }));
   }
   pop.appendChild(body);
-  pop.appendChild(h('div', { class: 'msel-foot' }, [
+  if (!cfg.single) pop.appendChild(h('div', { class: 'msel-foot' }, [
     h('button', { class: 'msel-act', type: 'button', onclick: () => { cfg.selected.clear(); cfg.onChange && cfg.onChange(); body.replaceChild(listNode(), body.firstChild); } }, '清空'),
     h('button', { class: 'msel-act msel-act-primary', type: 'button', onclick: () => close() }, '完成')
   ]));

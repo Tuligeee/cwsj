@@ -528,7 +528,7 @@ function pageHqTasks() {
       const cnt0 = {};
       state.tasks.forEach(t => { if (t.dept) cnt0[t.dept] = (cnt0[t.dept] || 0) + 1; });
       const deptFilter = chipFilterWithMore({
-        label: '部门', max: 4,
+        label: '部门', max: 10,      /* 2026-11-11：先换行，超过 10 个才折叠 */
         options: () => Array.from(new Set(state.tasks.map(t => t.dept).filter(Boolean)))
           .map(d => ({ v: d, t: d, n: cnt0[d] || 0 })),
         selected: deptSet,
@@ -905,6 +905,30 @@ function openTaskForm(task, onDone, opts) {
    任务督办（任务 × 门店 矩阵）
    ========================================================= */
 let _boardFilter = { dept: new Set(), cycle: new Set(), status: new Set(), onlyProblem: false };
+/* ---------- 督办看板：可选日期（2026-11-11） ---------- */
+let _boardDate = ymd(new Date());
+function boardNow() {
+  const p = String(_boardDate).split('-');
+  return new Date(+p[0], +p[1] - 1, +p[2], 12, 0, 0);
+}
+/** 截至时刻：看今天就取"现在"，看过去那天取当天 23:59:59 */
+function boardAsOf() {
+  const d = boardNow();
+  if (ymd(d) === ymd(new Date())) return new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
+}
+function boardDateRange() {
+  return { min: ymd(addDays(new Date(), -89)), max: ymd(new Date()) };
+}
+function boardSetDate(v) {
+  const r = boardDateRange();
+  let d = String(v || '').slice(0, 10) || r.max;
+  if (d > r.max) d = r.max;
+  if (d < r.min) d = r.min;
+  _boardDate = d;
+  return d;
+}
+
 function pageHqBoard() {
   const wrap = h('div', { class: 'board-page' });
   const filterBox = h('div', { class: M2() ? 'flt-bare' : 'flt' });
@@ -916,12 +940,12 @@ function pageHqBoard() {
       if (_boardFilter.cycle.size && !_boardFilter.cycle.has(t.cycle)) return false;
       if (_boardFilter.status.size && !_boardFilter.status.has(t.status)) return false;
       if (_boardFilter.onlyProblem) {
-        const p = taskProgress(t);
+        const p = taskProgress(t, boardNow(), boardAsOf());
         if (!p.overdue) return false;
       }
       return true;
     }).sort((a, b) => {
-      const pa = taskProgress(a), pb = taskProgress(b);
+      const pa = taskProgress(a, boardNow(), boardAsOf()), pb = taskProgress(b, boardNow(), boardAsOf());
       return (pb.overdue - pa.overdue) || (pb.dueSoon - pa.dueSoon) || 0;
     });
   }
@@ -935,7 +959,7 @@ function pageHqBoard() {
     const all = allStores();
     const badSet = new Set();
     list.forEach(t => {
-      const pp = taskProgress(t);
+      const pp = taskProgress(t, boardNow(), boardAsOf());
       pp.cells.forEach(cc => { if (cc.status === 'overdue' || cc.status === 'due') badSet.add(cc.storeId); });
     });
     const stores = (_boardFilter.onlyProblem && badSet.size) ? all.filter(s => badSet.has(s.id)) : all;
@@ -962,7 +986,7 @@ function pageHqBoard() {
 
     const tbody = h('tbody');
     list.forEach(t => {
-      const p = taskProgress(t);
+      const p = taskProgress(t, boardNow(), boardAsOf());
       const tr = h('tr');
       tr.appendChild(h('td', { class: 'task-col' }, [
         h('div', { class: 'bm-title', text: t.title }),
@@ -1015,7 +1039,7 @@ function pageHqBoard() {
 
     /* ---- 汇总条 ---- */
     const sum = list.reduce((a, t) => {
-      const p = taskProgress(t);
+      const p = taskProgress(t, boardNow(), boardAsOf());
       a.overdue += p.overdue; a.due += p.dueSoon; a.done += p.done; a.exp += p.expected;
       return a;
     }, { overdue: 0, due: 0, done: 0, exp: 0 });
@@ -1038,7 +1062,7 @@ function pageHqBoard() {
     /* ---- 任务行 ---- */
     const rows = h('div', { class: 'bd-rows' });
     list.forEach(t => {
-      const p = taskProgress(t);
+      const p = taskProgress(t, boardNow(), boardAsOf());
       const pct = Math.round(p.rate);
       const row = h('div', { class: 'bd-row' + (p.overdue ? ' od' : '') });
       const head = h('button', { class: 'bd-head', type: 'button' }, [
@@ -1125,6 +1149,20 @@ function pageHqBoard() {
         onclick: () => { _boardFilter.status.clear(); if (v2) _boardFilter.status.add(v2); paintFilter(); paint(); }
       }, h('span', { text: t2 })));
     });
+    /* 日期：看哪一天的矩阵（默认今天，可回溯 90 天，不允许未来） */
+    const dr = boardDateRange();
+    const dateInp = inputNode({ type: 'date', value: _boardDate, min: dr.min, max: dr.max });
+    dateInp.setAttribute('data-dp-quick', 'none');   /* 看板只看过去，快捷项无意义 */
+    dateInp.classList.add('bd-date-inp');
+    dateInp.addEventListener('change', () => {
+      boardSetDate(dateInp.value);
+      paintFilter(); paint();
+    });
+    filterBox.appendChild(h('div', { class: 'flt-group bd-date' }, [
+      h('span', { class: 'flt-gl', text: '日期' }), dateInp
+    ]));
+    filterBox.appendChild(h('span', { class: 'flt-sep' }));
+
     filterBox.appendChild(h('div', { class: 'flt-group flt-seg' }, [
       h('span', { class: 'flt-gl', text: '状态' }), segTabs
     ]));
@@ -1141,17 +1179,28 @@ function pageHqBoard() {
       }).el
     ]));
 
+    /* 类型：下拉单选（2026-11-11 由一排标签改成下拉框） */
     const cycCnt = {};
     state.tasks.forEach(t => { if (t.cycle) cycCnt[t.cycle] = (cycCnt[t.cycle] || 0) + 1; });
+    const cycVal = _boardFilter.cycle.size === 1 ? Array.from(_boardFilter.cycle)[0] : '';
+    const cycOpts = ['daily', 'weekly', 'monthly', 'once']
+      .map(k => ({ v: k, t: CYCLE_LABEL[k], n: cycCnt[k] || 0 }));
+    const cycBtn = h('button', {
+      class: 'bd-sel' + (cycVal ? ' on' : ''), type: 'button',
+      onclick: (e) => {
+        e.stopPropagation();
+        openMultiPop({
+          label: '类型', single: true,
+          options: cycOpts, selected: _boardFilter.cycle,
+          onChange: () => { paintFilter(); paint(); }
+        }, cycBtn);
+      }
+    }, [
+      h('span', { class: 'bd-sel-t', text: cycVal ? CYCLE_LABEL[cycVal] : '全部类型' }),
+      h('span', { class: 'bd-sel-car', html: iconSvg('chevron', 12) })
+    ]);
     filterBox.appendChild(h('div', { class: 'flt-group' }, [
-      h('span', { class: 'flt-gl', text: '类型' }),
-      chipFilterWithMore({
-        label: '类型', max: 4,
-        options: () => ['daily', 'weekly', 'monthly', 'once'].map(k => [k, CYCLE_LABEL[k]])
-          .map(([k, l]) => ({ v: k, t: l, n: cycCnt[k] || 0 })),
-        selected: _boardFilter.cycle,
-        onChange: () => paint()
-      }).el
+      h('span', { class: 'flt-gl', text: '类型' }), cycBtn
     ]));
 
     filterBox.appendChild(h('button', {
@@ -1171,28 +1220,36 @@ function pageHqBoard() {
   /* 手机端筛选：三个按钮，点了弹出选择面板，选完就收起 */
   function paintFilterMobile() {
     clear(filterBox);
+    const dr2 = boardDateRange();
+    const dateInp2 = inputNode({ type: 'date', value: _boardDate, min: dr2.min, max: dr2.max });
+    dateInp2.setAttribute('data-dp-quick', 'none');
+    dateInp2.classList.add('bd-date-inp');
+    dateInp2.addEventListener('change', () => { boardSetDate(dateInp2.value); paintFilterMobile(); paint(); });
+    const dateRow = h('div', { class: 'm2-fpills bd-date-m' });
+    dateRow.appendChild(dateInp2);
     const pills = [
       ['部门', _boardFilter.dept, state.departments.map(d => ({ v: d, t: d }))],
       ['类型', _boardFilter.cycle, [
         { v: 'daily', t: '每日必做' }, { v: 'weekly', t: '每周必做' },
         { v: 'monthly', t: '每月必做' }, { v: 'once', t: '专项任务' }
-      ]],
+      ], true],
       ['状态', _boardFilter.status, [{ v: 'active', t: '进行中' }, { v: 'stopped', t: '已停止' }]]
     ];
     const row = h('div', { class: 'm2-fpills' });
-    pills.forEach(([label, set, opts]) => row.appendChild(h('button', {
+    pills.forEach(([label, set, opts, single]) => row.appendChild(h('button', {
       class: 'm2-fpill' + (set.size ? ' on' : ''),
-      onclick: () => openM2FilterSheet(label, opts, set)
+      onclick: () => openM2FilterSheet(label, opts, set, !!single)
     }, [label, set.size ? h('span', { class: 'n' }, String(set.size)) : null, h('span', { class: 'car' }, '▾')])));
     row.appendChild(h('button', {
       class: 'm2-fpill' + (_boardFilter.onlyProblem ? ' on' : ''),
       onclick: () => { _boardFilter.onlyProblem = !_boardFilter.onlyProblem; problemChk.checked = _boardFilter.onlyProblem; paintFilterMobile(); paint(); }
     }, ['只看逾期']));
+    filterBox.appendChild(dateRow);
     filterBox.appendChild(row);
   }
 
   /* 弹出式多选面板 */
-  function openM2FilterSheet(label, opts, set) {
+  function openM2FilterSheet(label, opts, set, single) {
     const body = h('div', { class: 'm2-sheet' });
     const paintSheet = () => {
       clear(body);
@@ -1201,6 +1258,14 @@ function pageHqBoard() {
         body.appendChild(h('button', {
           class: 'm2-opt' + (on ? ' on' : ''),
           onclick: () => {
+            if (single) {           /* 单选：点一个就替换，再点同一个取消，选完收起 */
+              const was = set.has(o.v);
+              set.clear();
+              if (!was) set.add(o.v);
+              paintFilterMobile(); paint();
+              if (typeof closeTopModal === 'function') closeTopModal();
+              return;
+            }
             on ? set.delete(o.v) : set.add(o.v);
             paintSheet(); paintFilterMobile(); paint();
           }
@@ -1231,7 +1296,7 @@ function pageHqBoard() {
 
 /* 手机端督办：某任务的全部门店状态 */
 function openBoardTaskDetail(t) {
-  const p = taskProgress(t);
+  const p = taskProgress(t, boardNow(), boardAsOf());
   const stores = allStores();
   const body = h('div', { class: 'store-list' }, stores.map(s => {
     const cell = p.cells.find(c => c.storeId === s.id);
@@ -1292,7 +1357,7 @@ function openCellDetail(t, storeId, cell) {
 function exportBoard() {
   const rows = [['任务', '类型', '截止规则', '发布部门', '发布人', '门店', '本期截止', '状态', '提交时间', '提交人', '完成说明']];
   tasksFilteredForExport().forEach(t => {
-    const p = taskProgress(t);
+    const p = taskProgress(t, boardNow(), boardAsOf());
     p.cells.forEach(c => {
       const s = getStore(c.storeId);
       const M = STATUS_META[c.status] || STATUS_META.na;
@@ -1300,7 +1365,7 @@ function exportBoard() {
         c.due ? ymdhm(c.due) : '', M.label, c.rec ? ymdhm(c.rec.doneAt) : '', c.rec ? c.rec.by : '', c.rec ? c.rec.text : '']);
     });
   });
-  downloadText('任务督办明细_' + ymd(new Date()) + '.csv', toCsv(rows));
+  downloadText('任务督办明细_' + _boardDate + '.csv', toCsv(rows));
   toast('已导出 CSV', 'ok');
 }
 function tasksFilteredForExport() {
@@ -1308,7 +1373,7 @@ function tasksFilteredForExport() {
     if (_boardFilter.dept.size && !_boardFilter.dept.has(t.dept)) return false;
     if (_boardFilter.cycle.size && !_boardFilter.cycle.has(t.cycle)) return false;
     if (_boardFilter.status.size && !_boardFilter.status.has(t.status)) return false;
-    if (_boardFilter.onlyProblem && !taskProgress(t).overdue) return false;
+    if (_boardFilter.onlyProblem && !taskProgress(t, boardNow(), boardAsOf()).overdue) return false;
     return true;
   });
 }
