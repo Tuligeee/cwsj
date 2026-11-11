@@ -207,8 +207,12 @@ function mulberry32(a) {
    站点可能部署在 /cwsj/（正式）或 /cwsj-stg/（测试），
    写死路径会让测试环境打到正式接口，所以从当前地址推出来。 */
 function apiBase() {
-  const m = location.pathname.match(/^\/([^\/]+)\//);
-  return (m && m[1] !== 'index.html') ? '/' + m[1] : '';
+  /* 2026-11-11 换域名：站点可能挂在 /cwsj/、/cwsj/cwsj/、/cwsj-stg/ 等任意深度，
+     只取第一段会拼错（域名下 /cwsj/cwsj/ 会拼成 /cwsj/api/... → 404）。
+     与 api.js 的 BASE 保持同一口径：优先用 Api.base（由 api.js 的 script src 推出），
+     否则退回"当前页面所在目录"。 */
+  if (window.Api && typeof window.Api.base === 'string') return window.Api.base;
+  return location.pathname.replace(/[^/]*$/, '').replace(/\/+$/, '');
 }
 function apiUrl(path) {
   return apiBase() + (path.charAt(0) === '/' ? path : '/' + path);
