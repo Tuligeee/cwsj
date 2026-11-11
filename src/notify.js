@@ -15,7 +15,8 @@ const S = require(path.join(__dirname, 'db.js'));
 const db = S.db;
 const ding = require('./ding.js');
 
-const LINK_BASE = process.env.CWSJ_LINK || 'http://47.114.33.192/cwsj/';
+/* 2026-11-11 换域名：优先读环境变量 CWSJ_LINK（systemd 里配），默认走新域名 */
+const LINK_BASE = (process.env.CWSJ_LINK || 'https://mancado.cn/cwsj/').replace(/\/?$/, '/');
 const QUIET_FROM = 22;   // 22:00
 const QUIET_TO = 8;      // 08:00
 const MAX_PER_DAY = Number(process.env.NOTIFY_MAX_PER_DAY || 10);
