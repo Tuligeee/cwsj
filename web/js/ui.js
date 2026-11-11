@@ -513,7 +513,8 @@ function imgSrc(p) {
   if (!s) return '';
   if (/^(https?:)?\/\//i.test(s) || /^data:/i.test(s)) return s;   /* 外链/内联不动 */
   s = s.replace(/^\/+/, '');                    /* 去掉前导斜杠 */
-  s = s.replace(/^(cwsj-stg|cwsj)\//i, '');     /* 去掉历史前缀 /cwsj/ 或 /cwsj-stg/ */
+  /* 反复去掉挂载前缀：/cwsj/、/cwsj/cwsj/、/cwsj-stg/ 以及任意深度 */
+  while (/^(cwsj-stg|cwsj)\//i.test(s)) s = s.replace(/^(cwsj-stg|cwsj)\//i, '');
   s = s.replace(/^uploads\//i, '');             /* 避免重复 uploads/ */
   return 'uploads/' + s;
 }

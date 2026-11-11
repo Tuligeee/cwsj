@@ -133,8 +133,9 @@
     async uploadImage(dataUrl) {
       const r = await request('POST', '/api/upload', { dataUrl });
       if (!r || !r.url) throw new Error('上传返回异常');
-      /* 落库时带上挂载前缀，页面里直接 <img src> 就能显示 */
-      return BASE + r.url;
+      /* 2026-11-11 换域名：只存相对路径 uploads/xxx，避免把挂载前缀写进数据
+         （域名下 BASE 是 /cwsj/cwsj，存绝对路径会变成 /cwsj/cwsj/uploads/... 显示时再拼就重复了） */
+      return String(r.url).replace(/^\/+/, '');
     },
 
     /* ---- 保存：防抖 + 串行 ---- */
