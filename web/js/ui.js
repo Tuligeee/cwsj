@@ -505,14 +505,27 @@ function donutHover(parts, opts) {
   return wrap;
 }
 
+
+/* 2026-11-11 换域名：图片地址统一成「相对 app 根」的 uploads/xxx
+   兼容 /cwsj/（IP 直连）、/cwsj/cwsj/（域名正式）、/cwsj-stg/（测试）三种挂载前缀 */
+function imgSrc(p) {
+  let s = String(p == null ? '' : p).trim();
+  if (!s) return '';
+  if (/^(https?:)?\/\//i.test(s) || /^data:/i.test(s)) return s;   /* 外链/内联不动 */
+  s = s.replace(/^\/+/, '');                    /* 去掉前导斜杠 */
+  s = s.replace(/^(cwsj-stg|cwsj)\//i, '');     /* 去掉历史前缀 /cwsj/ 或 /cwsj-stg/ */
+  s = s.replace(/^uploads\//i, '');             /* 避免重复 uploads/ */
+  return 'uploads/' + s;
+}
+
 function lightbox(src) {
-  const lb = h('div', { class: 'lightbox', onclick: () => lb.remove() }, h('img', { src: src }));
+  const lb = h('div', { class: 'lightbox', onclick: () => lb.remove() }, h('img', { src: imgSrc(src) }));
   document.body.appendChild(lb);
 }
 function thumbsNode(images) {
   if (!images || !images.length) return null;
   const w = h('div', { class: 'thumbs' });
-  images.forEach(src => w.appendChild(h('img', { class: 'thumb', src: src, onclick: () => lightbox(src) })));
+  images.forEach(src => w.appendChild(h('img', { class: 'thumb', src: imgSrc(src), onclick: () => lightbox(src) })));
   return w;
 }
 function linksNode(links) {
@@ -712,7 +725,7 @@ function imgUploader(images, onChange, max) {
     clear(pv);
     images.forEach((src, i) => {
       pv.appendChild(h('div', { class: 'img-pv' }, [
-        h('img', { src: src, onclick: () => lightbox(src) }),
+        h('img', { src: imgSrc(src), onclick: () => lightbox(src) }),
         h('button', { type: 'button', onclick: () => { images.splice(i, 1); paint(); onChange && onChange(images); } }, '×')
       ]));
     });

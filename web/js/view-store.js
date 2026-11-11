@@ -256,7 +256,7 @@ function openStoreTaskDetail(t, item, opt) {
       const item2 = h('div', { class: 'rec-item' + (r.rec ? '' : ' rec-miss') });
       const imgs = (r.rec && r.rec.images) ? r.rec.images : [];
       const thumbs = h('div', { class: 'rec-thumbs' });
-      imgs.slice(0, 3).forEach(src => thumbs.appendChild(h('img', { class: 'rec-thumb', src: src, onclick: (ev) => { ev.stopPropagation(); lightbox(src); } })));
+      imgs.slice(0, 3).forEach(src => thumbs.appendChild(h('img', { class: 'rec-thumb', src: imgSrc(src), onclick: (ev) => { ev.stopPropagation(); lightbox(src); } })));
       if (imgs.length > 3) thumbs.appendChild(h('span', { class: 'rec-more-n', text: '+' + (imgs.length - 3) }));
 
       const row = h('div', { class: 'rec-row' }, [
