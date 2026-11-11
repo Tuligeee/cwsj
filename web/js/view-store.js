@@ -771,16 +771,20 @@ function pageStoreTasks() {
   const wrap = h('div');
   const filterSet = new Set();    // 状态多选（空 = 全部）
   const creatorSet = new Set();   // 发布人多选（空 = 全部）
-  let period = 'today';           // today | week | month | all（周期筛选，不再拆成 4 个页面）
-  let cycleFilter = 'all';        // all | daily | weekly | monthly | once（专项任务并入本页）
+  /* 周期由左侧导航决定（桌面）；手机端仍用顶部药丸，初值兜底今日 */
+  let period = (window.__storePeriod || 'today');            // today | week | month | all
+  let cycleFilter = (window.__storeCycle === 'once') ? 'once' : 'all';
   /* 深链接兜底：外部可切到指定周期，避免「卡片在别的周期桶里 → 点消息什么也没发生」
      （2026-11-09：月度任务默认在「本月」，从消息点进来落在「今日」就找不到卡片） */
   window.__storeSetPeriod = function (p) {
     if (['today', 'week', 'month', 'all'].indexOf(p) < 0) return;
-    if (period === p) return;
-    period = p;
-    try { paint(); } catch (e) {}
+    window.__storePeriod = p;
+    window.__storeCycle = 'all';
+    if (period !== p || cycleFilter === 'once') { period = p; cycleFilter = 'all'; try { paint(); } catch (e) {} }
+    try { if (typeof refreshNav === 'function') refreshNav(); } catch (e) {}
   };
+  /* 导航点了「专项」时，页面创建后立刻按专项渲染 */
+  if (window.__storeCycle === 'once') cycleFilter = 'once';
 
   const periodBar = h('div', { class: 'tabs period-tabs' });
   const filterBar = h('div', { style: { marginBottom: '10px' } });
@@ -789,12 +793,13 @@ function pageStoreTasks() {
   /* 筛选行标签（与发布人筛选行同宽，保证选项左对齐） */
   const statusLabel = h('div', { class: 'frow' }, [h('span', { class: 'flabel', text: '任务状态（可多选）：' })]);
 
-  /** 本店全部在用任务的发布人（去重） */
+  /** 本店在用任务的发布部门（去重，2026-11-11 由「发布人」改为「发布部门」） */
   function creatorOptions() {
     const map = {};
     state.tasks.forEach(t => {
       if (t.status !== 'active' || !t.storeIds.includes(me.id)) return;
-      if (!map[t.creatorId]) map[t.creatorId] = { v: t.creatorId, t: t.creatorName + '（' + t.dept + '）' };
+      const d = String(t.dept || '未分部门');
+      if (!map[d]) map[d] = { v: d, t: d };
     });
     return Object.values(map).sort((a, b) => a.t.localeCompare(b.t, 'zh'));
   }
@@ -812,7 +817,7 @@ function pageStoreTasks() {
   /** 应用发布人筛选后的基础列表（按状态与截止时间统一排序） */
   function baseItems() {
     let items = periodItems(period);
-    if (creatorSet.size) items = items.filter(x => creatorSet.has(x.task.creatorId));
+    if (creatorSet.size) items = items.filter(x => creatorSet.has(String(x.task.dept || '未分部门')));
     return items.sort((a, b) => (ST_ORDER[a.status] - ST_ORDER[b.status]) || (a.due - b.due));
   }
   /* 专项任务（cycle=once）的实例：与原来独立页同一套取数 */
@@ -882,24 +887,7 @@ function pageStoreTasks() {
     ]));
 
 
-    /* 周期 */
-    const cycWrap = h('div', { class: 'cf-wrap' });
-    [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部']].forEach(([k, label]) => {
-      const on = period === k && cycleFilter !== 'once';
-      cycWrap.appendChild(h('button', {
-        class: 'cf-chip' + (on ? ' on' : ''), type: 'button',
-        onclick: () => { period = k; cycleFilter = 'all'; filterSet.clear(); paint(); }
-      }, [h('span', { text: label }), h('span', { class: 'cf-n', text: String(periodItems(k).length) })]));
-    });
-    const onceOn = cycleFilter === 'once';
-    cycWrap.appendChild(h('button', {
-      class: 'cf-chip' + (onceOn ? ' on' : ''), type: 'button',
-      onclick: () => { cycleFilter = onceOn ? 'all' : 'once'; filterSet.clear(); paint(); }
-    }, [h('span', { text: '专项' }), h('span', { class: 'cf-n', text: String(onceItems().length) })]));
-    bar.appendChild(h('span', { class: 'flt-sep' }));
-    bar.appendChild(h('div', { class: 'flt-group' }, [
-      h('span', { class: 'flt-gl', text: '周期' }), cycWrap
-    ]));
+    /* 周期已移到左侧导航（桌面端），此处不再渲染 */
 
 
     /* 发布人：标签 + 更多折叠 */
@@ -907,14 +895,14 @@ function pageStoreTasks() {
     /* 只显示人名（部门放 title），最多 3 个，其余进「更多」——保证三组能排成一排 */
     const cWrap = opts.length
       ? chipFilterWithMore({
-        label: '发布人', max: 3,
-        options: opts.map(o => ({ v: o.v, t: String(o.t).replace(/（.*?）/g, '').trim(), n: undefined })),
+        label: '发布部门', max: 4,
+        options: opts.map(o => ({ v: o.v, t: o.t, n: undefined })),
         selected: creatorSet, onChange: () => paint()
       }).el
       : h('span', { class: 'flt-hint', text: '暂无任务' });
     bar.appendChild(h('span', { class: 'flt-sep' }));
     bar.appendChild(h('div', { class: 'flt-group' }, [
-      h('span', { class: 'flt-gl', text: '发布人' }), cWrap
+      h('span', { class: 'flt-gl', text: '发布部门' }), cWrap
     ]));
 
     /* 手机端：三颗药丸 + 底部弹层（与总部一致） */
@@ -924,8 +912,8 @@ function pageStoreTasks() {
           : '已选 ' + filterSet.size + ' 项';
       const cycText = cycleFilter === 'once' ? '专项' : ({ today: '今日', week: '本周', month: '本月', all: '全部' }[period] || '今日');
       const cText = creatorSet.size === 0 ? '全部'
-        : creatorSet.size === 1 ? String(Array.from(creatorSet)[0] ? creatorOptions().find(o => o.v === Array.from(creatorSet)[0])?.t || '1 人' : '1 人').replace(/（.*?）/g, '')
-          : '已选 ' + creatorSet.size + ' 人';
+        : creatorSet.size === 1 ? String(Array.from(creatorSet)[0] || '1 个部门')
+          : '已选 ' + creatorSet.size + ' 个';
       return h('div', { class: 'mf-bar' }, [
         filterPill({
           label: '状态', value: stText, active: filterSet.size > 0, count: filterSet.size || '',
@@ -943,7 +931,7 @@ function pageStoreTasks() {
             const cur = new Set([cycleFilter === 'once' ? 'once' : period]);
             openFilterSheet({
               title: '周期', multi: false,
-              options: [['today', '今日'], ['week', '本周'], ['month', '本月'], ['all', '全部'], ['once', '专项']]
+              options: [['today', '今日'], ['week', '本周'], ['month', '本月'], ['once', '专项'], ['all', '全部']]
                 .map(([k, t]) => ({ v: k, t: t })),
               selected: cur,
               onChange: () => {
@@ -956,9 +944,9 @@ function pageStoreTasks() {
           }
         }),
         filterPill({
-          label: '发布人', value: cText, active: creatorSet.size > 0, count: creatorSet.size || '',
+          label: '发布部门', value: cText, active: creatorSet.size > 0, count: creatorSet.size || '',
           onClick: () => openFilterSheet({
-            title: '发布人', multi: true,
+            title: '发布部门', multi: true,
             options: creatorOptions().map(o => ({ v: o.v, t: o.t })),
             selected: creatorSet, onChange: () => paint()
           })

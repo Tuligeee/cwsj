@@ -7,7 +7,17 @@ const ROUTES = {
     {
       /* 周期不再拆成 4 个导航项，合并成一个「我的任务」页，页内用「今日/本周/本月/全部」筛选
          专项任务(once) 排序规则不同，保留为独立入口 */
-      g: '我的任务', items: [{ id: 'tasks', label: '我的任务', iconKey: 'checklist' }]
+      g: '我的任务', items: [{
+        id: 'tasks', label: '我的任务', iconKey: 'checklist',
+        /* 2026-11-11：周期筛选移到左侧导航，折叠展示（手机端仍是顶部药丸） */
+        children: [
+          { period: 'today', label: '今日' },
+          { period: 'week', label: '本周' },
+          { period: 'month', label: '本月' },
+          { period: 'once', label: '专项' },
+          { period: 'all', label: '全部' }
+        ]
+      }]
     },
     {
       g: '需求与协同', items: [
@@ -22,7 +32,17 @@ const ROUTES = {
     /* 任务在前、门店提需在后（2026-11-06 调整顺序） */
     {
       g: '任务管理', items: [
-        { id: 'hq-tasks', label: '任务管理', iconKey: 'checklist' },
+        {
+          id: 'hq-tasks', label: '任务管理', iconKey: 'checklist',
+          /* 2026-11-11：任务类型移到左侧导航，折叠展示（手机端仍是顶部药丸） */
+          children: [
+            { cycle: 'daily', label: '每日必做' },
+            { cycle: 'weekly', label: '每周必做' },
+            { cycle: 'monthly', label: '每月必做' },
+            { cycle: 'once', label: '专项任务' },
+            { cycle: 'all', label: '全部' }
+          ]
+        },
         { id: 'hq-board', label: '任务督办看板', iconKey: 'board' }
       ]
     },
@@ -43,13 +63,13 @@ const ROUTES = {
 };
 
 const PAGE_TITLE = {
-  tasks: ['我的任务', '按今日 / 本周 / 本月 / 全部筛选 · 临期标黄 · 逾期标红'],
+  tasks: ['我的任务', '左侧「我的任务」展开可选今日 / 本周 / 本月 / 全部 · 临期标黄 · 逾期标红'],
   once: ['专项任务', '只下发一次的任务；未完成的按截止时间置顶'],
   demands: ['我的提需', '向管理公司各部门提需求，管委会评估后派发责任人'],
   contacts: ['通讯录', '什么事找谁 · 由人事部维护'],
   mystats: ['我的数据', '门店任务完成情况统计，用于考核'],
   'hq-demands': ['门店提需', '评估 → 派发 → 处理 → 门店确认'],
-  'hq-tasks': ['任务管理', '默认看我发布的；管委会可切换看全公司'],
+  'hq-tasks': ['任务管理', '左侧「任务管理」展开可选每日/每周/每月/专项/全部 · 默认看我发布的'],
   'hq-board': ['任务督办看板', '任务 × 门店矩阵，快速定位逾期门店'],
   'hq-contacts': ['通讯录', '管理公司各部门职责与对接人 · 由人事部维护'],
   'hq-stats': ['数据统计与考核', '门店任务完成 + 管理公司需求处理数据'],
@@ -158,6 +178,33 @@ function applyDeepLink() {
 }
 window.addEventListener('hashchange', applyDeepLink);
 
+/* ---------- 侧栏「我的任务」折叠状态与计数（2026-11-11） ---------- */
+let _navTasksOpen = (function () { try { return localStorage.getItem('cwsj_nav_tasks_open') === '1'; } catch (e) { return false; } })();
+let _navHqOpen = (function () { try { return localStorage.getItem('cwsj_nav_hq_open') === '1'; } catch (e) { return false; } })();
+function navSetOpen(v) {
+  _navTasksOpen = !!v;
+  try { localStorage.setItem('cwsj_nav_tasks_open', _navTasksOpen ? '1' : '0'); } catch (e) {}
+}
+function navSetOpenHq(v) {
+  _navHqOpen = !!v;
+  try { localStorage.setItem('cwsj_nav_hq_open', _navHqOpen ? '1' : '0'); } catch (e) {}
+}
+/** 总部：每个任务类型有多少条 */
+function navCountsHq() {
+  try {
+    const all = (state.tasks || []);
+    const n = k => all.filter(t => t.cycle === k).length;
+    return { daily: n('daily'), weekly: n('weekly'), monthly: n('monthly'), once: n('once'), all: '' };
+  } catch (e) { return {}; }
+}
+function navCounts() {
+  try {
+    const b = storeBuckets(me.id, new Date());
+    const once = state.tasks.filter(t => t.status === 'active' && t.cycle === 'once' && t.storeIds.indexOf(me.id) >= 0).length;
+    return { today: b.today.length, week: b.week.length, month: b.month.length, all: '', once: once };
+  } catch (e) { return {}; }
+}
+
 function go(id, silent) {
   currentRoute = id;
   const routes = ROUTES[isStore() ? 'store' : 'hq'];
@@ -172,13 +219,58 @@ function go(id, silent) {
       const el = h('div', {
         class: 'nav-item' + (it.id === id ? ' active' : ''),
         dataset: { nav: it.id },        /* 手机端按 id 隐藏部分入口（CSS 里控制，桌面端不受影响） */
-        onclick: () => go(it.id)
+        onclick: () => {
+          if (it.children && !M2()) {
+            const isHq = it.id === 'hq-tasks';
+            const openNow = isHq ? _navHqOpen : _navTasksOpen;
+            if (currentRoute === it.id) {
+              (isHq ? navSetOpenHq : navSetOpen)(!openNow);
+              refreshNav(); return;
+            }
+            (isHq ? navSetOpenHq : navSetOpen)(true);
+          }
+          go(it.id);
+        }
       }, [
         h('span', { class: 'ni', html: iconSvg(it.iconKey || 'dot', 18) }),
         h('span', { class: 'nl', text: it.label }),
-        n > 0 ? h('span', { class: 'nav-badge' }, n > 99 ? '99+' : String(n)) : null
+        n > 0 ? h('span', { class: 'nav-badge' }, n > 99 ? '99+' : String(n)) : null,
+        (it.children && !M2()) ? h('span', {
+          class: 'nav-caret' + (_navTasksOpen ? ' open' : ''),
+          html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
+        }) : null
       ]);
       nav.appendChild(el);
+      /* 子项（桌面端，折叠展开） */
+      const kidsOpen = it.id === 'hq-tasks' ? _navHqOpen : (it.id === 'tasks' ? _navTasksOpen : false);
+      if (it.children && !M2() && kidsOpen) {
+        const isHq = it.id === 'hq-tasks';
+        const cnt = isHq ? navCountsHq() : navCounts();
+        const curP = window.__storePeriod || 'today';
+        const curOnce = window.__storeCycle === 'once';
+        const curC = window.__hqCycle || 'all';
+        it.children.forEach(ch => {
+          const key = isHq ? ch.cycle : ch.period;
+          const on = isHq
+            ? (currentRoute === it.id && curC === key)
+            : (currentRoute === it.id && (key === 'once' ? curOnce : (!curOnce && curP === key)));
+          const n = cnt[key];
+          nav.appendChild(h('div', {
+            class: 'nav-sub' + (on ? ' active' : ''),
+            dataset: isHq ? { nav: it.id, cycle: key } : { nav: it.id, period: key },
+            onclick: () => {
+              if (isHq) { window.__hqCycle = key; }
+              else if (key === 'once') { window.__storeCycle = 'once'; }
+              else { window.__storeCycle = 'all'; window.__storePeriod = key; }
+              go(it.id);
+            }
+          }, [
+            h('span', { class: 'ns-dot' }),
+            h('span', { class: 'ns-l', text: ch.label }),
+            (n !== '' && n !== undefined && n !== null) ? h('span', { class: 'ns-n', text: String(n) }) : null
+          ]));
+        });
+      }
     });
   });
 

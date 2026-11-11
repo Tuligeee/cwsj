@@ -2198,3 +2198,27 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 
 /* ===== 弹窗叠层（2026-11-09）：第二层遮罩只轻微加深，避免两层 50% 叠成一片黑 ===== */
 .modal-mask.nested{background:rgba(12,16,26,.22);backdrop-filter:blur(1px);}
+
+/* ===== 侧栏子项（2026-11-11）：我的任务 → 周期 ===== */
+.nav-sub{
+  display:flex;align-items:center;gap:9px;
+  padding:6px 10px 6px 40px;margin:1px 0 1px 2px;
+  border-radius:8px;cursor:pointer;color:var(--text-2);
+  font-size:13px;line-height:1.5;position:relative;
+}
+.nav-sub:hover{background:var(--panel-2);color:var(--text);}
+.nav-sub .ns-dot{width:5px;height:5px;border-radius:50%;background:var(--line-strong, #cfd6e4);flex:0 0 auto;}
+.nav-sub .ns-l{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nav-sub .ns-n{font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.nav-sub.active{background:var(--brand-50);color:var(--brand);font-weight:600;}
+.nav-sub.active .ns-dot{background:var(--brand);}
+.nav-sub.active .ns-n{color:var(--brand);}
+@media (max-width:900px){ .nav-sub{display:none;} }
+
+/* ===== 侧栏展开箭头（2026-11-11） ===== */
+.nav-caret{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
+  margin-left:2px;color:var(--text-3);flex:0 0 auto;transition:transform .16s var(--ease);}
+.nav-caret svg{width:12px;height:12px;}
+.nav-caret.open{transform:rotate(90deg);color:var(--brand);}
+.nav-item:hover .nav-caret{color:var(--text-2);}
+@media (max-width:900px){ .nav-caret{display:none;} }

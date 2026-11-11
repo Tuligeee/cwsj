@@ -332,7 +332,8 @@ function pageHqTasks() {
   const scopeSet = new Set(isCommittee() ? ['mine', 'others'] : ['mine']);
   const tabSet = new Set(['active']);   // 任务状态多选（空 = 全部）
   const deptSet = new Set();             // 发布部门多选（空 = 全部）
-  const cycleSet = new Set();            // 任务类型多选（每日/每周/每月/专项，空 = 全部）
+  /* 任务类型由左侧导航决定（单选取代原来的多选，2026-11-11） */
+  const cycleSet = new Set((window.__hqCycle && window.__hqCycle !== 'all') ? [window.__hqCycle] : []);
   const statBox = h('div');
   const scopeBar = h('div', { class: 'm2-toolrow', style: { marginLeft: 'auto' } });
   const tabsBar = h('div', { class: 'tabs chip-tabs seg-track' });
@@ -544,7 +545,7 @@ function pageHqTasks() {
       label: '类型', max: 4,
       options: () => {
         const scoped = deptSet.size ? state.tasks.filter(t => deptSet.has(t.dept)) : state.tasks;
-        return [['daily', '每日'], ['weekly', '每周'], ['monthly', '每月'], ['once', '专项']]
+        return ['daily', 'weekly', 'monthly', 'once'].map(k => [k, CYCLE_LABEL[k]])
           .map(([k, l]) => ({ v: k, t: l, n: scoped.filter(t => t.cycle === k).length }));
       },
       selected: cycleSet,
@@ -555,12 +556,11 @@ function pageHqTasks() {
     if (M2()) {
       wrap.appendChild(mfBarBox);
     } else {
+      /* 类型已移到左侧导航（桌面端），筛选条只留 状态 / 部门 */
       const bar = h('div', { class: 'flt-bar' }, [
         h('div', { class: 'flt-group flt-seg' }, [h('span', { class: 'flt-gl', text: '状态' }), tabsBar]),
         h('span', { class: 'flt-sep' }),
-        deptBar,
-        h('span', { class: 'flt-sep' }),
-        cycleBar
+        deptBar
       ]);
       wrap.appendChild(bar);
     }
@@ -1147,7 +1147,7 @@ function pageHqBoard() {
       h('span', { class: 'flt-gl', text: '类型' }),
       chipFilterWithMore({
         label: '类型', max: 4,
-        options: () => [['daily', '每日'], ['weekly', '每周'], ['monthly', '每月'], ['once', '专项']]
+        options: () => ['daily', 'weekly', 'monthly', 'once'].map(k => [k, CYCLE_LABEL[k]])
           .map(([k, l]) => ({ v: k, t: l, n: cycCnt[k] || 0 })),
         selected: _boardFilter.cycle,
         onChange: () => paint()
