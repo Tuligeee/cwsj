@@ -34,6 +34,8 @@ function openModal(opt) {
   ]);
   mask.appendChild(box);
   mask.addEventListener('mousedown', e => { if (e.target === mask && opt.maskClosable !== false) inst.close(); });
+  /* 打开弹窗时锁住背景页滚动，否则手机上滑动会穿透到下面的页面 */
+  if (!_modalStack.length) document.body.style.overflow = 'hidden';
   $('#modal-root').appendChild(mask);
 
   const inst = {
@@ -41,6 +43,7 @@ function openModal(opt) {
     close: function () {
       const i = _modalStack.indexOf(inst); if (i >= 0) _modalStack.splice(i, 1);
       mask.remove();
+      if (!_modalStack.length) document.body.style.overflow = '';
       if (_modalStack.length) _modalStack[_modalStack.length - 1].box.style.filter = '';
     },
     setTitle: t => { box.querySelector('h3').textContent = t; }
