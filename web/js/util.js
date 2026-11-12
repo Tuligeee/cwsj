@@ -169,7 +169,7 @@ function fallbackCopy(t, cb) {
 }
 
 /* ---------- 图片压缩 ---------- */
-function readImage(file, maxW = 1080, quality = 0.72) {
+function readImage(file, maxW = 1920, quality = 0.8) {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) return reject(new Error('不是图片文件'));
     const fr = new FileReader();
@@ -178,8 +178,8 @@ function readImage(file, maxW = 1080, quality = 0.72) {
       const img = new Image();
       img.onerror = () => reject(new Error('图片解析失败'));
       img.onload = () => {
-        let w = img.width, hgt = img.height;
-        if (w > maxW) { hgt = Math.round(hgt * maxW / w); w = maxW; }
+        const _sz = fitImageSize(img.width, img.height, maxW);
+        let w = _sz.w, hgt = _sz.h;
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = hgt;
         const ctx = cv.getContext('2d');
@@ -228,4 +228,22 @@ function applyTheme(t) {
 function initTheme() {
   document.documentElement.setAttribute('data-theme', 'light');
   try { localStorage.removeItem(THEME_KEY); } catch (e) { }
+}
+
+/* ---------- 图片相关纯函数（单元测试直接覆盖这两个） ---------- */
+/** 压缩尺寸：长边等比缩到 max 以内；不放大、不返回 0 尺寸 */
+function fitImageSize(w, h, max) {
+  w = Math.max(0, Math.round(w || 0));
+  h = Math.max(0, Math.round(h || 0));
+  const m = Math.max(w, h);
+  if (!m || m <= max) return { w: w, h: h };
+  const r = max / m;
+  return { w: Math.round(w * r), h: Math.round(h * r) };
+}
+
+/** 是否可上传的图片文件：优先看 MIME，没有 MIME 再看扩展名 */
+function isImageFile(f) {
+  if (!f) return false;
+  if (typeof f.type === 'string' && f.type) return /^image\//.test(f.type);
+  return /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name || '');
 }

@@ -121,7 +121,7 @@ function openDoneModal(item, onDone) {
   const text = textareaNode({ placeholder: '填写完成情况说明，例如：已完成全部 3 台机器自检，2 号机出卡偶发延迟已报修。', rows: '4' });
   const images = [];
   const links = [];
-  const up = imgUploader(images, null, 6);
+  const up = imgUploader(images, null, 30);
   const le = linkEditor(links, null);
   const requireImg = (t.priority >= 4);
 
@@ -1210,7 +1210,7 @@ function openNewDemandModal(onDone, existing) {
       fgroup('需求标题', title, null, true),
       fgroup('需求描述', desc, '建议写明：现状 / 影响 / 期望解决方式 / 期望时间', true),
       fgroup('期望对接部门', deptSel, '不确定可留空，由管委会指定'),
-      fgroup('图片（可选）', imgUploader(images, null, 6)),
+      fgroup('图片（可选）', imgUploader(images, null, 30)),
       fgroup('相关链接（可选）', linkEditor(links, null))
     ]),
     footer: [

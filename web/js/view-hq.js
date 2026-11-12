@@ -307,7 +307,7 @@ function openHandleModal(d, onDone) {
         h('div', { class: 'db-c', text: d.desc || '' })
       ]),
       fgroup('处理说明', text, null, true),
-      fgroup('图片凭证（可选）', imgUploader(images, null, 6)),
+      fgroup('图片凭证（可选）', imgUploader(images, null, 30)),
       fgroup('相关链接（可选）', linkEditor(links, null))
     ]),
     footer: [
@@ -810,7 +810,7 @@ function openTaskForm(task, onDone, opts) {
       h('div', { style: { marginTop: '10px' } },
         switchNode(remindOverdue, '逾期后每天再提醒一次（任务在门店端标红）', v => { remindOverdue = v; }))
     ])),
-    fgroup('任务附件图片（可选）', imgUploader(images, null, 4)),
+    fgroup('任务附件图片（可选）', imgUploader(images, null, 30)),
     fgroup('相关链接（可选）', linkEditor(links, null))
   ]);
   paintCycle(); paintDynamic();
