@@ -41,18 +41,6 @@ const WB_TOOLS = [
     name: '码表核对',
     desc: '机台码表填报与对账',
     url: wbSibling('meter')
-  },
-  {
-    icon: 'calendar',
-    name: '日报监控台',
-    desc: '看日报状态 · 一键触发',
-    url: wbSibling('daily')
-  },
-  {
-    icon: 'link',
-    name: '宝点扫码登录',
-    desc: '扫码换宝点登录态',
-    url: wbSibling('bd-login')
   }
 ];
 
