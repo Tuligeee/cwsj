@@ -1,3 +1,16 @@
+/* 测试环境横幅：只在 /cwsj-stg/ 路径下注入，避免把"测试环境"字样带到正式环境（2026-11-16）
+   以前是写死在 index.html 里的，结果随部署一起带进了正式库。 */
+(function stgBanner() {
+  try {
+    if (!/\/cwsj-stg(\/|$)/.test(location.pathname)) return;
+    const b = document.createElement('div');
+    b.id = 'stg-banner';
+    b.textContent = '测试环境 · 数据为生产副本 · 改动不影响正式系统';
+    b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#F59E0B;color:#231a00;font:600 12px/1.6 -apple-system,PingFang SC,sans-serif;text-align:center;padding:4px 8px;';
+    if (document.body) document.body.appendChild(b);
+    else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(b));
+  } catch (e) { /* 横幅失败不影响主流程 */ }
+})();
 /* =========================================================
    app.js — 登录、路由、导航、提醒中心
    ========================================================= */
