@@ -117,7 +117,9 @@ a{color:var(--brand); text-decoration:none;}
 }
 .brand-name{font-size:15px;font-weight:700;letter-spacing:.4px;}
 .brand-sub{font-size:11px;color:var(--text-3);margin-top:1px;}
-.side-nav{flex:1;overflow:auto;padding:12px 10px;}
+.side-nav{flex:1;overflow:auto;padding:12px 10px;display:flex;flex-direction:column;}
+/* 工作台：贴着导航最下面（2026-11-16 用户要求放最下面） */
+.nav-item.nav-pin{margin-top:auto;}
 .nav-group{font-size:11px;color:var(--text-3);padding:12px 10px 6px;letter-spacing:.6px;font-weight:400;}
 .nav-item{
   display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;cursor:pointer;
