@@ -18,6 +18,10 @@
 const ROUTES = {
   store: [
     {
+      /* 工作台（2026-11-16）：先只放入口，工具以后再往里加（见 view-workbench.js） */
+      g: '概览', items: [{ id: 'workbench', label: '工作台', iconKey: 'grid' }]
+    },
+    {
       /* 周期不再拆成 4 个导航项，合并成一个「我的任务」页，页内用「今日/本周/本月/全部」筛选
          专项任务(once) 排序规则不同，保留为独立入口 */
       g: '我的任务', items: [{
@@ -42,6 +46,10 @@ const ROUTES = {
     { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', iconKey: 'more' }] : [] }
   ],
   hq: [
+    /* 工作台（2026-11-16）：先只放入口，工具以后再往里加（见 view-workbench.js） */
+    {
+      g: '概览', items: [{ id: 'workbench', label: '工作台', iconKey: 'grid' }]
+    },
     /* 任务在前、门店提需在后（2026-11-06 调整顺序） */
     {
       g: '任务管理', items: [
@@ -76,6 +84,7 @@ const ROUTES = {
 };
 
 const PAGE_TITLE = {
+  workbench: ['工作台', '常用工具集中在这里'],
   tasks: ['我的任务', '左侧「我的任务」展开可选今日 / 本周 / 本月 / 全部 · 临期标黄 · 逾期标红'],
   once: ['专项任务', '只下发一次的任务；未完成的按截止时间置顶'],
   demands: ['我的提需', '向管理公司各部门提需求，管委会评估后派发责任人'],

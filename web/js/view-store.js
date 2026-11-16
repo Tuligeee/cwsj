@@ -1540,6 +1540,7 @@ function exportStoreStats() {
 
 /* ---------------- 门店端路由表 ---------------- */
 const PAGE_STORE = {
+  workbench: () => pageWorkbench(),
   tasks: () => pageStoreTasks(),
   more: () => pageMore(),
   once: () => pageAllTasks(),

@@ -2514,3 +2514,34 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   border:0;background:transparent;color:var(--brand);cursor:pointer;font-size:12.5px;padding:0;
 }
 .kw-hint .kw-clear:hover{text-decoration:underline;}
+
+/* ================= 工作台（2026-11-16） =================
+   先只有入口和占位；WB_TOOLS 里加了工具后自动变卡片网格 */
+.wb-page{padding:2px 0;}
+.wb-empty{
+  border:1px dashed var(--line); border-radius:var(--radius);
+  background:var(--panel); padding:46px 20px; text-align:center;
+}
+.wb-empty-ico{color:var(--text-3); line-height:0; margin-bottom:10px;}
+.wb-empty-t{font-size:14.5px; font-weight:700; color:var(--text-2);}
+.wb-empty-d{font-size:12.5px; color:var(--text-3); margin:6px auto 0; max-width:400px; line-height:1.7;}
+
+.wb-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:12px;}
+.wb-card{
+  display:flex; align-items:center; gap:12px;
+  padding:14px 16px; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--panel); box-shadow:var(--shadow);
+  cursor:pointer; transition:border-color .18s var(--ease), transform .18s var(--ease);
+}
+.wb-card:hover{border-color:var(--brand); transform:translateY(-1px);}
+.wb-card.off{cursor:default; opacity:.55; box-shadow:none;}
+.wb-card.off:hover{border-color:var(--line); transform:none;}
+.wb-ico{
+  width:34px; height:34px; border-radius:10px; flex:none;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--brand-50); color:var(--brand);
+}
+.wb-body{flex:1; min-width:0;}
+.wb-n{font-size:13.5px; font-weight:700;}
+.wb-d{font-size:11.5px; color:var(--text-3); margin-top:2px;}
+.wb-go{flex:none; font-size:16px; color:var(--text-3);}

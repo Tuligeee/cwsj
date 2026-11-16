@@ -2690,6 +2690,7 @@ function pageAdmin() {
 
 /* ---------------- 管理公司路由表 ---------------- */
 const PAGE_HQ = {
+  workbench: () => pageWorkbench(),
   'hq-demands': () => pageHqDemands(),
   more: () => pageMore(),
   'hq-tasks': () => pageHqTasks(),
