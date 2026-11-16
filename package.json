@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node src/seed.js",
+    "test:unit": "node tests/unit-node.js",
     "test:reset": "node tests/reset-fixtures.js",
     "test:e2e": "bash tests/run-e2e.sh",
     "seed:real": "node scripts/pull_dingtalk_org.js && node scripts/build_real_seed.js",

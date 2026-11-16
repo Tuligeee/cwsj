@@ -49,8 +49,9 @@ function upsertTask(state, task, actorId) {
 function patchTask(state, id, patch, actorId) {
   const t = findTask(state, id);
   if (!t) return { fail: '任务不存在' };
+  const before = JSON.parse(JSON.stringify(t));
   Object.assign(t, patch || {});
-  return { actorId: actorId, result: t };
+  return { actorId: actorId, result: t, _before: before };
 }
 
 function dropTask(state, id) {
@@ -76,6 +77,10 @@ function register(app, requireAuth, log) {
     if (t.creatorId !== a.id && !a.isAdmin && !a.isCommittee) {
       return res.status(403).json({ ok: false, msg: '只有任务发布人或管理员可以修改该任务' });
     }
+    /* 隐私任务：管委会也不行，只有发布人 + 管理员（2026-11-16） */
+    if (t.privacy && !(t.creatorId === a.id || a.isAdmin)) {
+      return res.status(403).json({ ok: false, msg: '隐私任务只有发布人和管理员可以操作' });
+    }
     next();
   };
   app.post('/api/tasks', requireAuth, hqOnly, (req, res) => {
@@ -86,13 +91,20 @@ function register(app, requireAuth, log) {
     if (exists) return res.status(409).json({ ok: false, msg: '任务 ID 已存在：' + task.id });
     const r = withRetry(st => upsertTask(st, task, req.actor.id));
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
+    try { require('./visibility').notifyNewVisible(null, r.result); } catch (e) { console.error('visibility.create', e.message); }
     log(req.actor.id, 'task.upsert', task && task.id);
     res.json({ ok: true, version: r.version, task: r.result });
   });
 
   app.patch('/api/tasks/:id', requireAuth, hqOnly, ownerOrAdmin, (req, res) => {
-    const r = withRetry(st => patchTask(st, req.params.id, (req.body || {}).patch, req.actor.id));
+    let before = null;
+    const r = withRetry(st => {
+      const out = patchTask(st, req.params.id, (req.body || {}).patch, req.actor.id);
+      if (out && out._before) before = out._before;
+      return out;
+    });
     if (!r.ok) return res.status(400).json({ ok: false, msg: r.msg });
+    try { require('./visibility').notifyNewVisible(before, r.result); } catch (e) { console.error('visibility.patch', e.message); }
     log(req.actor.id, 'task.patch', req.params.id);
     res.json({ ok: true, version: r.version, task: r.result });
   });
@@ -120,3 +132,4 @@ function register(app, requireAuth, log) {
 }
 
 module.exports = { register, withRetry };
+

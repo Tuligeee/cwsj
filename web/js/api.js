@@ -107,6 +107,12 @@
       if (typeof r.version === 'number') version = r.version;
       return r;
     },
+    /* 判定：kind = 'fail'（不合格，需 reason）/ 'warn'（警告，不需 reason）；needRedo 仅周/月/专项可用 */
+    async verdictRecord(payload) {
+      const r = await request('POST', '/api/record/verdict', payload);
+      if (typeof r.version === 'number') version = r.version;
+      return r;
+    },
 
     /* ---- 管理员后台：门店与人员账号 ----
        服务端是权威：接口返回最新 state，前端就地替换，避免「本地改了、库没改」 */

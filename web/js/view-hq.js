@@ -326,12 +326,16 @@ function openHandleModal(d, onDone) {
 /* =========================================================
    我发布的任务
    ========================================================= */
+/* 任务管理页的筛选条件放模块作用域（2026-11-15）：切换「每日/每周/每月/专项」会整页重建 */
+const _hqTaskFlt = { status: new Set(['active']), dept: new Set() };
+
 function pageHqTasks() {
   const wrap = h('div');
   /* 任务来源多选：我发布的 / 其他部门发布的（两个都选 = 全公司） */
-  const scopeSet = new Set(isCommittee() ? ['mine', 'others'] : ['mine']);
-  const tabSet = new Set(['active']);   // 任务状态多选（空 = 全部）
-  const deptSet = new Set();             // 发布部门多选（空 = 全部）
+  /* 2026-11-16：默认全部（全总部都能看到彼此发布的任务），筛选仍可切回「只看我发布的」 */
+  const scopeSet = new Set(['mine', 'others']);
+  const tabSet = _hqTaskFlt.status;   // 任务状态多选（空 = 全部）
+  const deptSet = _hqTaskFlt.dept;    // 发布部门多选（空 = 全部）
   /* 任务类型由左侧导航决定（单选取代原来的多选，2026-11-11） */
   const cycleSet = new Set((window.__hqCycle && window.__hqCycle !== 'all') ? [window.__hqCycle] : []);
   const statBox = h('div');
@@ -356,7 +360,7 @@ function pageHqTasks() {
   /** 应用「任务来源」筛选后的任务 */
   function sourceItems() {
     const mineOn = scopeSet.has('mine'), othersOn = scopeSet.has('others');
-    return state.tasks.filter(t => (mineOn && t.creatorId === me.id) || (othersOn && t.creatorId !== me.id));
+    return state.tasks.filter(t => !t.redacted && ((mineOn && t.creatorId === me.id) || (othersOn && t.creatorId !== me.id)));
   }
   function base() {
     let l = sourceItems();
@@ -526,7 +530,7 @@ function pageHqTasks() {
     deptBar.appendChild(h('span', { class: 'flt-gl', text: '部门' }));
     {
       const cnt0 = {};
-      state.tasks.forEach(t => { if (t.dept) cnt0[t.dept] = (cnt0[t.dept] || 0) + 1; });
+      state.tasks.forEach(t => { if (!t.redacted && t.dept) cnt0[t.dept] = (cnt0[t.dept] || 0) + 1; });
       const deptFilter = chipFilterWithMore({
         label: '部门', max: 10,      /* 2026-11-11：先换行，超过 10 个才折叠 */
         options: () => Array.from(new Set(state.tasks.map(t => t.dept).filter(Boolean)))
@@ -544,7 +548,7 @@ function pageHqTasks() {
     const cycleFilter = chipFilterWithMore({
       label: '类型', max: 4,
       options: () => {
-        const scoped = deptSet.size ? state.tasks.filter(t => deptSet.has(t.dept)) : state.tasks;
+        const scoped = (deptSet.size ? state.tasks.filter(t => deptSet.has(t.dept)) : state.tasks).filter(t => !t.redacted);
         return ['daily', 'weekly', 'monthly', 'once'].map(k => [k, CYCLE_LABEL[k]])
           .map(([k, l]) => ({ v: k, t: l, n: scoped.filter(t => t.cycle === k).length }));
       },
@@ -578,14 +582,22 @@ function taskAdminCard(t, refresh) {
   const stCls = t.status !== 'active' ? ' st-stopped' : (p.overdue ? ' st-overdue' : p.dueSoon ? ' st-due' : '');
   const openDetail = () => openTaskDetail({ task: t, due: occDue(t, new Date()), key: occKey(t, new Date()), rec: null, status: 'normal' });
   const card = h('div', {
-    class: 'task-card hq-card' + stCls, dataset: { taskId: t.id || '' },
+    class: 'task-card hq-card' + stCls + (t.privacy ? ' is-private' : ''), dataset: { taskId: t.id || '' },
     title: '点击查看进度明细',
     onclick: (ev) => { if (ev.target.closest('a,button,img')) return; openDetail(); }
   });
+  /* 隐私任务：右下角一枚大号锁形水印（lucide/lock 原路径，纯装饰 aria-hidden） */
+  if (t.privacy) {
+    card.appendChild(h('span', {
+      class: 'privacy-mark', 'aria-hidden': 'true',
+      html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+    }));
+  }
   card.appendChild(h('div', { class: 'tc-head' }, [
     h('div', { style: { flex: '1', minWidth: '0' } }, [
       h('div', { class: 'tc-title', text: t.title }),
       h('div', { class: 'tc-meta' }, [
+        t.privacy ? tagNode('隐私', 'tag-gray') : null,
         tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle]),
         h('span', {}, cycleDesc(t)),
         h('span', { class: 'sep' }, '·'),
@@ -793,12 +805,63 @@ function openTaskForm(task, onDone, opts) {
   const picker = storePicker(d.storeIds || [], null);
   const star = starPicker(d.priority, v => { priority = v; });
 
+  /* ---- 隐私任务（2026-11-16）：默认公开；勾上后只有「我 + 勾选的人 + 管理员」能看到 ----
+     管理员兜底这件事对任何人都不提示，界面上不写。 */
+  let privacy = !!d.privacy;
+  const visibleSet = new Set(d.visibleTo || []);
+  const peopleBox = h('div', { style: { marginTop: '10px' } });
+  function paintPeople() {
+    clear(peopleBox);
+    peopleBox.style.display = privacy ? '' : 'none';
+    if (!privacy) return;
+    const hqs = (state.hq || []).filter(p => p.enabled !== false && p.id !== me.id);
+    if (!hqs.length) { peopleBox.appendChild(h('div', { class: 'fhint', text: '没有可选的人' })); return; }
+
+    const countEl = h('span', { class: 'vp-n', text: String(visibleSet.size) });
+    peopleBox.appendChild(h('div', { class: 'vp-head' }, [
+      h('span', { text: '谁可以看（不选 = 只有我自己）' }),
+      countEl
+    ]));
+
+    /* 按部门分组：一行一个部门，部门名在左、人名在右；未选灰、选中亮 */
+    const byDept = {};
+    hqs.forEach(p => { const d = p.dept || '未分部门'; (byDept[d] = byDept[d] || []).push(p); });
+    const panel = h('div', { class: 'vp-panel' });
+    Object.keys(byDept).sort((a, b) => a.localeCompare(b, 'zh')).forEach(dept => {
+      const chips = h('div', { class: 'vp-chips' });
+      byDept[dept].slice()
+        .sort((x, y) => String(x.name).localeCompare(String(y.name), 'zh'))
+        .forEach(p => {
+          const chip = h('div', {
+            class: 'vp-chip' + (visibleSet.has(p.id) ? ' on' : ''),
+            title: p.name + (p.dept ? '·' + p.dept : ''),
+            text: p.name,
+          });
+          chip.onclick = () => {
+            if (visibleSet.has(p.id)) visibleSet.delete(p.id); else visibleSet.add(p.id);
+            chip.classList.toggle('on');
+            countEl.textContent = String(visibleSet.size);
+          };
+          chips.appendChild(chip);
+        });
+      panel.appendChild(h('div', { class: 'vp-row' }, [
+        h('span', { class: 'vp-dept', text: dept }), chips
+      ]));
+    });
+    peopleBox.appendChild(panel);
+  }
+  paintPeople();
+
   const body = h('div', {}, [
     fgroup('任务标题', ref.title, null, true),
     fgroup('任务说明', ref.content, '门店在任务卡片上会看到这段说明', true),
     fgroup('任务类型', cycleRow, '每日/每周/每月必做 = 设定一次后长期自动循环；专项任务 = 只下发一次'),
     dynBox,
     fgroup('派发门店', picker.node, '可多选，按城市分组展示', true),
+    fgroup('可见范围', h('div', {}, [
+      switchNode(privacy, '隐私任务（只有我和下面勾选的人能看到）', v => { privacy = v; paintPeople(); }),
+      peopleBox
+    ]), '不勾 = 全总部可见；门店不受影响，被派到的门店照样能看到并提交'),
     fgroup('重要程度', star, '影响门店端任务的排序与提醒强度'),
     fgroup('提醒门店', h('div', { class: 'rm-box' }, [
       h('div', { class: 'rm-head' }, [
@@ -854,6 +917,7 @@ function openTaskForm(task, onDone, opts) {
             weekday: Number(ref.weekday.value), monthDay: Number(ref.monthDay.value),
             deadline: cycle === 'once' ? new Date(ref.deadline.value).toISOString() : null,
             storeIds: storeIds, priority: priority,
+            privacy: privacy, visibleTo: privacy ? Array.from(visibleSet) : [],
             remindBeforeMin: Number(remindMin) || 0, remindOverdue: remindOverdue,
             images: images.slice(), links: links.filter(l => l.url && /^https?:/i.test(l.url)),
             startDate: (function () {
@@ -936,6 +1000,7 @@ function pageHqBoard() {
 
   function tasksFiltered() {
     return state.tasks.filter(t => {
+      if (t.redacted) return false;            /* 隐私任务：无权人只看统计，不进看板 */
       if (_boardFilter.dept.size && !_boardFilter.dept.has(t.dept)) return false;
       if (_boardFilter.cycle.size && !_boardFilter.cycle.has(t.cycle)) return false;
       if (_boardFilter.status.size && !_boardFilter.status.has(t.status)) return false;
@@ -1000,7 +1065,7 @@ function pageHqBoard() {
         const st = cell ? cell.status : 'na';
         const M = STATUS_META[st] || STATUS_META.na;
         /* 逾期不再写文字：浅红块即可，悬停显示逾期时长（2026-11-06） */
-        const glyph = st === 'done' || st === 'late' ? '✓' : '';
+        const glyph = st === 'done' || st === 'late' ? '✓' : (st === 'rejected' ? '!' : '');
         let tip = s.name + '：' + M.label;
         if (st === 'overdue' && cell && cell.due) {
           const hrs = Math.max(1, Math.floor((Date.now() - new Date(cell.due).getTime()) / 3600000));
@@ -1168,7 +1233,7 @@ function pageHqBoard() {
     ]));
 
     const deptCnt = {};
-    state.tasks.forEach(t => { if (t.dept) deptCnt[t.dept] = (deptCnt[t.dept] || 0) + 1; });
+    state.tasks.forEach(t => { if (!t.redacted && t.dept) deptCnt[t.dept] = (deptCnt[t.dept] || 0) + 1; });
     filterBox.appendChild(h('div', { class: 'flt-group' }, [
       h('span', { class: 'flt-gl', text: '部门' }),
       chipFilterWithMore({
@@ -1181,7 +1246,7 @@ function pageHqBoard() {
 
     /* 类型：下拉单选（2026-11-11 由一排标签改成下拉框） */
     const cycCnt = {};
-    state.tasks.forEach(t => { if (t.cycle) cycCnt[t.cycle] = (cycCnt[t.cycle] || 0) + 1; });
+    state.tasks.forEach(t => { if (!t.redacted && t.cycle) cycCnt[t.cycle] = (cycCnt[t.cycle] || 0) + 1; });
     const cycVal = _boardFilter.cycle.size === 1 ? Array.from(_boardFilter.cycle)[0] : '';
     const cycOpts = ['daily', 'weekly', 'monthly', 'once']
       .map(k => ({ v: k, t: CYCLE_LABEL[k], n: cycCnt[k] || 0 }));
@@ -1338,7 +1403,13 @@ function openCellDetail(t, storeId, cell) {
       h('dt', {}, '任务'), h('dd', {}, t.title),
       h('dt', {}, '任务类型'), h('dd', {}, tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle])),
       h('dt', {}, '本期截止'), h('dd', {}, ymdhm(due)),
-      h('dt', {}, '当前状态'), h('dd', {}, tagNode(M.label, M.tag)),
+      h('dt', {}, '当前状态'), h('dd', {}, (function () {
+        const v = rec ? openVerdict(rec) : null;
+        if (!v) return tagNode(M.label, M.tag);
+        return h('span', { class: 'row', style: { gap: '6px' } }, [
+          v.needRedo ? tagNode('待重做', 'tag-red') : tagNode('未完成', 'tag-gray')
+        ]);
+      })()),
       h('dt', {}, '发布部门'), h('dd', {}, t.dept + ' · ' + t.creatorName)
     ]),
     rec ? h('div', { class: 'mt14' }, [
@@ -1370,6 +1441,7 @@ function exportBoard() {
 }
 function tasksFilteredForExport() {
   return state.tasks.filter(t => {
+    if (t.redacted) return false;
     if (_boardFilter.dept.size && !_boardFilter.dept.has(t.dept)) return false;
     if (_boardFilter.cycle.size && !_boardFilter.cycle.has(t.cycle)) return false;
     if (_boardFilter.status.size && !_boardFilter.status.has(t.status)) return false;
@@ -1435,6 +1507,7 @@ function pageHqStats() {
       h('span', { class: 'st-rule-i', text: '完成率 ' + acfg.completionWeight + ' / 按时率 ' + acfg.ontimeWeight }),
       h('span', { class: 'st-rule-i', text: '逾期提交 -' + acfg.lateSubmitDeduct }),
       h('span', { class: 'st-rule-i', text: '逾期未交 -' + acfg.overdueMissDeduct }),
+      h('span', { class: 'st-rule-i', text: '警告 -' + (acfg.warnDeduct || 0) }),
       h('span', { class: 'st-rule-i', text: '合格线 ' + acfg.passLine })
     ]));
     body.appendChild(h('div', { class: 'card mt14' }, [
@@ -1490,7 +1563,7 @@ function pageHqStats() {
       h('thead', {}, h('tr', {}, [
         h('th', { class: 'st-th-rank' }, '排名'), h('th', {}, '门店'), h('th', { class: 'num' }, '应完成'),
         h('th', { class: 'num' }, '已完成'), h('th', { class: 'num' }, '完成率'), h('th', { class: 'num' }, '按时'),
-        h('th', { class: 'num' }, '逾期完成'), h('th', { class: 'num' }, '逾期未交'),
+        h('th', { class: 'num' }, '逾期完成'), h('th', { class: 'num' }, '逾期未交'), h('th', { class: 'num' }, '警告'),
         h('th', { class: 'num' }, '考核得分'), h('th', {}, '考核建议')
       ])),
       h('tbody', {}, rank.map((r, i) => {
@@ -1507,6 +1580,7 @@ function pageHqStats() {
           h('td', { class: 'num' }, String(r.ontime)),
           h('td', { class: 'num' }, String(r.late)),
           h('td', { class: 'num' + (r.missed ? ' bad' : '') }, String(r.missed)),
+          h('td', { class: 'num' + (r.warnN ? ' bad' : '') }, String(r.warnN || 0)),
           h('td', { class: 'num' }, h('a', {
             href: 'javascript:void(0)', style: { fontWeight: '600', color: sc.pass ? 'var(--ok-tx)' : 'var(--danger-tx)' },
             onclick: () => openScoreDetail(r.store.name, sc, acfg)
@@ -1530,6 +1604,7 @@ function pageHqStats() {
             h('tr', {}, [h('td', {}, '按时率得分'), h('td', { class: 'num' }, '+' + sc.oScore.toFixed(1))]),
             h('tr', {}, [h('td', {}, '逾期提交（补交）' + sc.lateN + ' 次 × ' + cfg.lateSubmitDeduct), h('td', { class: 'num' }, '-' + (sc.lateN * cfg.lateSubmitDeduct).toFixed(1))]),
             h('tr', {}, [h('td', {}, '逾期未交 ' + sc.missN + ' 次 × ' + cfg.overdueMissDeduct), h('td', { class: 'num' }, '-' + (sc.missN * cfg.overdueMissDeduct).toFixed(1))]),
+            h('tr', {}, [h('td', {}, '标记警告 ' + (sc.warnN || 0) + ' 次 × ' + (cfg.warnDeduct || 0)), h('td', { class: 'num' }, '-' + ((sc.warnN || 0) * (cfg.warnDeduct || 0)).toFixed(1))]),
             h('tr', {}, [h('td', { style: { fontWeight: '700' } }, '合计'), h('td', { class: 'num', style: { fontWeight: '700' } }, sc.total.toFixed(1) + ' 分')])
           ])
         ]),
@@ -1673,6 +1748,7 @@ function openAssessSettingsModal(onDone) {
   const ref = {
     base: num(c.base, 0, 1000), completionWeight: num(c.completionWeight, 0, 1000), ontimeWeight: num(c.ontimeWeight, 0, 1000),
     lateSubmitDeduct: num(c.lateSubmitDeduct, 0, 100, 0.5), overdueMissDeduct: num(c.overdueMissDeduct, 0, 100, 0.5),
+    warnDeduct: num(c.warnDeduct, 0, 100, 0.5),
     demandOverdueDeduct: num(c.demandOverdueDeduct, 0, 100, 0.5), demandFailDeduct: num(c.demandFailDeduct, 0, 100, 0.5),
     passLine: num(c.passLine, 0, 1000, 5)
   };
@@ -1693,7 +1769,8 @@ function openAssessSettingsModal(onDone) {
     const rest = Math.max(0, Number(ref.base.value || 0) - Number(ref.completionWeight.value || 0) - Number(ref.ontimeWeight.value || 0));
     formula.appendChild(h('div', { class: 'db-c' }, '门店考核得分 = 基础分 ' + (Number(ref.base.value) || 0) + '（其中完成率占 ' + ref.completionWeight.value
       + '、按时率占 ' + ref.ontimeWeight.value + '、剩余基础分 ' + rest + '）+ 完成率得分 + 按时率得分 − 逾期提交次数 × '
-      + ref.lateSubmitDeduct.value + ' − 逾期未交次数 × ' + ref.overdueMissDeduct.value + '；低于合格线 ' + ref.passLine.value + ' 分判定为不合格。'));
+      + ref.lateSubmitDeduct.value + ' − 逾期未交次数 × ' + ref.overdueMissDeduct.value
+      + ' − 警告次数 × ' + ref.warnDeduct.value + '；低于合格线 ' + ref.passLine.value + ' 分判定为不合格。'));
     formula.appendChild(h('div', { class: 'db-c', style: { marginTop: '4px' } }, '需求责任人考核得分 = 100 − 超期处理次数 × ' + ref.demandOverdueDeduct.value + ' − 被门店退回重做次数 × ' + ref.demandFailDeduct.value + '。'));
   }
   const inst = openModal({
@@ -1710,7 +1787,8 @@ function openAssessSettingsModal(onDone) {
           fgroup('完成率占分', ref.completionWeight, '从基础总分中划出', true),
           fgroup('按时率占分', ref.ontimeWeight, '剩余部分为基础分', true),
           fgroup('逾期提交（补交）每次扣', ref.lateSubmitDeduct, null, true),
-          fgroup('逾期未交每次扣', ref.overdueMissDeduct, null, true)
+          fgroup('逾期未交每次扣', ref.overdueMissDeduct, null, true),
+          fgroup('标记警告每次扣', ref.warnDeduct, '发布人认定「没做却点了提交」的次数', true)
         ])
       ]),
       h('div', { class: 'sub-group', style: { margin: '0' } }, [
@@ -1733,6 +1811,7 @@ function openAssessSettingsModal(onDone) {
             mode: mode, base: base, completionWeight: cw, ontimeWeight: ow,
             lateSubmitDeduct: Number(ref.lateSubmitDeduct.value) || 0,
             overdueMissDeduct: Number(ref.overdueMissDeduct.value) || 0,
+            warnDeduct: Number(ref.warnDeduct.value) || 0,
             demandOverdueDeduct: Number(ref.demandOverdueDeduct.value) || 0,
             demandFailDeduct: Number(ref.demandFailDeduct.value) || 0,
             passLine: Number(ref.passLine.value) || 0
@@ -2566,3 +2645,9 @@ const PAGE_HQ = {
   'hq-stats': () => pageHqStats(),
   'admin': () => pageAdmin()
 };
+
+
+
+
+
+

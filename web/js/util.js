@@ -247,3 +247,51 @@ function isImageFile(f) {
   if (typeof f.type === 'string' && f.type) return /^image\//.test(f.type);
   return /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name || '');
 }
+
+/* ---------- 任务判定 / 考核计分（纯函数，单元测试直接覆盖） ----------
+   判定挂在完成记录的 rec.verdicts 数组里，一条一判、可多条：
+     kind='fail' 不合格（必须 reason）/ kind='warn' 警告（认定「没做却点了提交」）
+     resolvedAt 有值 = 已结案（门店重交）；未结案 → 该期不算完成。 */
+/** 未结案的判定（取最新一条），没有返回 null */
+function openVerdict(rec) {
+  const arr = (rec && rec.verdicts) || [];
+  for (let i = arr.length - 1; i >= 0; i--) if (!arr[i].resolvedAt) return arr[i];
+  return null;
+}
+/** 该记录历史上「警告」的次数（含已结案的，考核用） */
+function warnCountOf(rec) {
+  return ((rec && rec.verdicts) || []).filter(function (v) { return v.kind === 'warn'; }).length;
+}
+/** 阶梯系数：完成率/按时率 → 折算比例 */
+function stepFactor(p) {
+  if (p >= 95) return 1;
+  if (p >= 90) return 0.9;
+  if (p >= 80) return 0.75;
+  if (p >= 70) return 0.6;
+  return 0.4;
+}
+/** 门店考核得分（纯函数）：c = {rate, ontimeRate, late, missed, warnN} */
+function assessScore(cfg, c) {
+  cfg = cfg || {};
+  c = c || {};
+  const base = Number(cfg.base) || 0;
+  const cw = Number(cfg.completionWeight) || 0;
+  const ow = Number(cfg.ontimeWeight) || 0;
+  const basePart = Math.max(0, base - cw - ow);
+  const rate = Number(c.rate) || 0, ontimeRate = Number(c.ontimeRate) || 0;
+  const cScore = cfg.mode === 'step' ? cw * stepFactor(rate) : cw * rate / 100;
+  const oScore = cfg.mode === 'step' ? ow * stepFactor(ontimeRate) : ow * ontimeRate / 100;
+  const lateN = Number(c.late) || 0;
+  const missN = Number(c.missed) || 0;
+  const warnN = Number(c.warnN) || 0;
+  const deduct = lateN * (Number(cfg.lateSubmitDeduct) || 0)
+    + missN * (Number(cfg.overdueMissDeduct) || 0)
+    + warnN * (Number(cfg.warnDeduct) || 0);
+  const total = basePart + cScore + oScore - deduct;
+  return {
+    basePart: basePart, cScore: cScore, oScore: oScore, deduct: deduct,
+    lateN: lateN, missN: missN, warnN: warnN,
+    total: Math.round(Math.max(0, total) * 10) / 10,
+    pass: total >= (Number(cfg.passLine) || 0)
+  };
+}

@@ -55,6 +55,54 @@
   t('isImageFile', '空对象为假', function () { return eq(isImageFile({}), false); });
   t('isImageFile', 'null 为假', function () { return eq(isImageFile(null), false); });
 
+  /* ---------------- 判定状态：openVerdict / warnCountOf ---------------- */
+  var V1 = { kind: 'fail', at: '2026-11-14T02:00:00Z', reason: '照片糊', needRedo: true, redoDue: '2026-11-15T02:00:00Z', resolvedAt: null };
+  var V2 = { kind: 'warn', at: '2026-11-14T03:00:00Z', reason: '', needRedo: false, resolvedAt: '2026-11-14T04:00:00Z' };
+
+  t('verdict', '没有判定返回 null', function () { return eq(openVerdict({}), null); });
+  t('verdict', 'null 记录不崩', function () { return eq(openVerdict(null), null); });
+  t('verdict', '未结案的判定原样返回', function () {
+    var r = openVerdict({ verdicts: [V1] });
+    return { ok: r === V1, detail: r && r.kind };
+  });
+  t('verdict', '已结案的判定不算未结案', function () { return eq(openVerdict({ verdicts: [V2] }), null); });
+  t('verdict', '多条时取最新的未结案那条', function () {
+    var b = { kind: 'fail', at: 'x', resolvedAt: null };
+    return { ok: openVerdict({ verdicts: [V2, b] }) === b, detail: '' };
+  });
+  t('warning', '没有判定时次数为 0', function () { return eq(warnCountOf({}), 0); });
+  t('warning', '只数警告、不数不合格', function () { return eq(warnCountOf({ verdicts: [V1, V2] }), 1); });
+  t('warning', '两条警告计 2 次（含已结案）', function () {
+    return eq(warnCountOf({ verdicts: [V2, { kind: 'warn', at: 'y', resolvedAt: null }] }), 2);
+  });
+
+  /* ---------------- 考核计分：assessScore ---------------- */
+  var CFG = { mode: 'ratio', base: 100, completionWeight: 50, ontimeWeight: 30, lateSubmitDeduct: 2, overdueMissDeduct: 5, warnDeduct: 5, passLine: 60 };
+  t('assessScore', '满分 → 100', function () {
+    return eq(assessScore(CFG, { rate: 100, ontimeRate: 100 }).total, 100);
+  });
+  t('assessScore', '一条警告扣 5 分', function () {
+    return eq(assessScore(CFG, { rate: 100, ontimeRate: 100, warnN: 1 }).total, 95);
+  });
+  t('assessScore', '警告分可配成 0（不扣）', function () {
+    return eq(assessScore(Object.assign({}, CFG, { warnDeduct: 0 }), { rate: 100, ontimeRate: 100, warnN: 3 }).total, 100);
+  });
+  t('assessScore', '逾期未交 2 次 + 警告 1 次 = 100 − 10 − 5', function () {
+    return eq(assessScore(CFG, { rate: 100, ontimeRate: 100, missed: 2, warnN: 1 }).total, 85);
+  });
+  t('assessScore', '缺字段不产生 NaN', function () {
+    var r = assessScore(CFG, {});
+    return { ok: !isNaN(r.total), detail: String(r.total) };
+  });
+  t('assessScore', '扣分超过基础分时封底 0', function () {
+    return eq(assessScore(CFG, { rate: 0, ontimeRate: 0, missed: 100, warnN: 10 }).total, 0);
+  });
+  t('assessScore', '合格线判定跟着总分走', function () {
+    var ok = assessScore(CFG, { rate: 100, ontimeRate: 100 }).pass;
+    var no = assessScore(CFG, { rate: 0, ontimeRate: 0, missed: 20 }).pass;
+    return { ok: ok === true && no === false, detail: ok + '/' + no };
+  });
+
   /* ---------------- 渲染 ---------------- */
   function render() {
     var rows = document.getElementById('rows');

@@ -140,6 +140,18 @@ function applyDeepLink() {
   const kind = m[1];
   const id = decodeURIComponent(m[2]);
   const wantFill = m[3] === 'fill=1';
+  /* 隐私任务：没有权限的人拿到的是脱敏存根，直接告诉他无权查看，别让页面干等 */
+  if (kind === 'task' && (typeof state === 'undefined' || !state.tasks)) {
+    setTimeout(applyDeepLink, 400); return;   /* 数据还没到，等下一次 */
+  }
+  if (kind === 'task') {
+    const hit = state.tasks.find(t => t.id === id);
+    if (hit && hit.redacted) { toast('这条任务你没有查看权限', 'err'); return; }
+    if (!hit) {
+      const storeSide0 = isStore();
+      if (!storeSide0) { toast('任务不存在或你没有查看权限', 'err'); return; }
+    }
+  }
   const storeSide = isStore();
   try {
     go(kind === 'task' ? (storeSide ? 'tasks' : 'hq-tasks') : (storeSide ? 'demands' : 'hq-demands'));
@@ -309,6 +321,7 @@ var AUDIT_LABEL = {
   'login.ok': '登录成功', 'login.fail': '登录失败', 'pwd.change': '修改密码',
   'state.save': '保存数据', 'state.deny': '保存被拒',
   'record.submit': '提交完成', 'record.revoke': '撤销提交', 'img.upload': '上传图片',
+  'record.reject': '判定不合格', 'record.warn': '标记警告',
   'task.upsert': '新建/修改任务', 'task.patch': '调整任务', 'task.delete': '删除任务',
   'task.stop': '停止任务', 'task.resume': '恢复任务', 'import.commit': '批量导入任务',
   'demand.upsert': '提交需求', 'demand.review': '评估需求', 'demand.review.deny': '评估被拒',
@@ -603,6 +616,26 @@ async function boot() {
 const _flushPending = () => { try { window.Api && Api.flushNow && Api.flushNow(); } catch (_) {} };
 window.addEventListener('pagehide', _flushPending);
 window.addEventListener('beforeunload', _flushPending);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') _flushPending(); });
+/* 2026-11-13：以前全量数据只在打开页面时取一次，切走再切回来、或在别的窗口/手机上提交过的，
+   本页会一直显示「进行中 · 还没提交」（苏州一店连做 4 遍）。回到前台静默重取一次。 */
+async function refreshFromServer() {
+  try {
+    if (!me || !window.Api || !Api.getToken()) return;
+    /* 有弹窗（可能正在填提交表单）就跳过，别把用户正在写的内容冲掉 */
+    if (typeof _modalStack !== 'undefined' && _modalStack && _modalStack.length) return;
+    if (document.querySelector('#modal-root .modal-mask')) return;
+    const b = await Api.bootstrap();
+    window.__BOOT_STATE = b.state;
+    window.__BOOT_ME = b.me;
+    loadState();
+    go(currentRoute || (isStore() ? 'tasks' : 'hq-tasks'), true);
+  } catch (e) { /* 静默：网络抖动不打扰门店 */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { setTimeout(refreshFromServer, 300); return; }
+  _flushPending();
+});
 
 document.addEventListener('DOMContentLoaded', boot);
+
+

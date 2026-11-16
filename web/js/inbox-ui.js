@@ -7,6 +7,7 @@
 
   const SCEN_LABEL = {
     A1: '新任务', A2: '即将到期', A3: '已逾期', A4: '催办', A5: '已提交',
+    A6: '判定不合格', A7: '被警告', A8: '已重做', V1: '查看权限',
     B1: '待评估', B2: '待派发', B3: '已驳回', B4: '派单', B5: '待确认',
     B6: '已确认', B7: '退回重做', B8: '临近完成', C1: '超期', C2: '评估堆积', C3: '确认堆积'
   };
@@ -264,3 +265,4 @@
   document.addEventListener('DOMContentLoaded', () => setTimeout(build, 400));
   if (document.readyState !== 'loading') setTimeout(build, 400);
 })(window);
+

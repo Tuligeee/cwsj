@@ -12,7 +12,8 @@ let _ri = null;        // 完成记录索引缓存
 /* ---------------- 初始化 ---------------- */
 const ASSESS_DEFAULT = {
   mode: 'ratio', base: 100, completionWeight: 50, ontimeWeight: 30,
-  lateSubmitDeduct: 2, overdueMissDeduct: 5, demandOverdueDeduct: 5, demandFailDeduct: 10, passLine: 60
+  lateSubmitDeduct: 2, overdueMissDeduct: 5, warnDeduct: 5,
+  demandOverdueDeduct: 5, demandFailDeduct: 10, passLine: 60
 };
 
 function loadState() {
@@ -195,12 +196,20 @@ function recIndex() {
 }
 function getRecord(taskId, storeId, key) { return recIndex()[recKey(taskId, storeId, key)] || null; }
 
+/* ---------------- 判定（不合格 / 警告，2026-11-14） ----------------
+   openVerdict / warnCountOf / assessScore 都放在 util.js（纯函数，可在 test/unit.html 直接测）；
+   这里只保留与之配套的派生状态：occStatus 会把「有未结案判定」的期次判成 rejected。 */
+
 /* ---------------- 状态计算 ---------------- */
-const ST_ORDER = { overdue: 0, due: 1, normal: 2, late: 3, done: 4, na: 5 };
-const ST_LABEL = { overdue: '已逾期', due: '即将到期', normal: '进行中', late: '逾期完成', done: '已完成', na: '不适用' };
+const ST_ORDER = { overdue: 0, rejected: 1, due: 2, normal: 3, late: 4, done: 5, na: 6 };
+const ST_LABEL = {
+  overdue: '已逾期', rejected: '待重做', due: '即将到期',
+  normal: '进行中', late: '逾期完成', done: '已完成', na: '不适用'
+};
 
 function occStatus(due, task, rec, now) {
   if (rec) {
+    if (openVerdict(rec)) return 'rejected';
     const late = rec.late || new Date(rec.doneAt).getTime() > new Date(due).getTime() + 60000;
     return late ? 'late' : 'done';
   }
@@ -211,7 +220,7 @@ function occStatus(due, task, rec, now) {
   return 'normal';
 }
 function statusTagCls(st) {
-  return st === 'overdue' ? 'tag-red' : st === 'due' ? 'tag-yellow' : st === 'done' ? 'tag-green'
+  return st === 'overdue' ? 'tag-red' : st === 'rejected' ? 'tag-red' : st === 'due' ? 'tag-yellow' : st === 'done' ? 'tag-green'
     : st === 'late' ? 'tag-yellow' : st === 'normal' ? 'tag-gray' : 'tag-gray';
 }
 
@@ -290,7 +299,7 @@ function taskProgress(task, now, asOf) {
   const nowD = now ? new Date(now) : new Date();
   /* asOf：还原"截至某一刻"的状态。看历史某天时，那天之后才提交的记录应视为未交（2026-11-11） */
   const cut = asOf ? new Date(asOf) : nowD;
-  const res = { expected: 0, done: 0, lateDone: 0, overdue: 0, dueSoon: 0, rate: 0, cells: [] };
+  const res = { expected: 0, done: 0, lateDone: 0, overdue: 0, dueSoon: 0, rejected: 0, rate: 0, cells: [] };
   task.storeIds.forEach(sid => {
     if (task.status === 'active' && !taskActiveOn(task, nowD)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
     const due = occDue(task, nowD);
@@ -302,6 +311,7 @@ function taskProgress(task, now, asOf) {
     res.expected++;
     if (st === 'done') res.done++;
     else if (st === 'late') { res.done++; res.lateDone++; }
+    else if (st === 'rejected') res.rejected++;
     else if (st === 'overdue') res.overdue++;
     else if (st === 'due') res.dueSoon++;
   });
@@ -313,7 +323,7 @@ function taskProgress(task, now, asOf) {
 function storeCompletion(storeId, days, now) {
   const nowD = now ? new Date(now) : new Date();
   const from = addDays(startOfDay(nowD), -(days - 1));
-  const acc = () => ({ expected: 0, done: 0, ontime: 0, late: 0, missed: 0 });
+  const acc = () => ({ expected: 0, done: 0, ontime: 0, late: 0, missed: 0, rejected: 0 });
   const total = acc();
   const byCycle = { daily: acc(), weekly: acc(), monthly: acc(), once: acc() };
   const trend = [];
@@ -353,24 +363,39 @@ function storeCompletion(storeId, days, now) {
       [total, byCycle[t.cycle] || total, dayStats[dkey]].forEach(a => {
         if (!a) return;
         a.expected++;
-        if (rec) {
+        /* 有未结案判定（不合格/警告）→ 这期不算完成，但也**不算逾期未交**
+           （不合格不额外扣分，靠完成率体现；警告的扣分单独算） */
+        if (rec && !openVerdict(rec)) {
           a.done++;
           if (rec.late || new Date(rec.doneAt).getTime() > due.getTime() + 60000) a.late++; else a.ontime++;
-        } else a.missed++;
+        } else if (rec) a.rejected++;
+        else a.missed++;
       });
     });
   }
+  /* 警告次数（考核用）：按判定发生时间落进统计窗口，不受「期次去重」影响 */
+  const fromTs = from.getTime(), nowTs = nowD.getTime();
+  let warnN = 0;
+  (state.records || []).forEach(r => {
+    if (r.storeId !== storeId) return;
+    (r.verdicts || []).forEach(v => {
+      if (v.kind !== 'warn') return;
+      const ts = new Date(v.at).getTime();
+      if (ts >= fromTs && ts <= nowTs) warnN++;
+    });
+  });
+
   for (const k in dayStats) trend.push({ day: k, ...dayStats[k] });
   trend.sort((a, b) => a.day < b.day ? -1 : 1);
 
   function fin(a) {
     return {
-      expected: a.expected, done: a.done, ontime: a.ontime, late: a.late, missed: a.missed,
+      expected: a.expected, done: a.done, ontime: a.ontime, late: a.late, missed: a.missed, rejected: a.rejected,
       rate: pct(a.done, a.expected), ontimeRate: pct(a.ontime, a.expected)
     };
   }
   return {
-    storeId, days, ...fin(total),
+    storeId, days, ...fin(total), warnN: warnN,
     byCycle: { daily: fin(byCycle.daily), weekly: fin(byCycle.weekly), monthly: fin(byCycle.monthly), once: fin(byCycle.once) },
     trend: trend
   };
@@ -989,30 +1014,9 @@ window.__refreshAfterServerWrite = function () { _ri = null; };
 function getAssessCfg() { return Object.assign({}, ASSESS_DEFAULT, state.assessCfg || {}); }
 function saveAssessCfg(cfg) { state.assessCfg = Object.assign({}, ASSESS_DEFAULT, cfg); saveState(); }
 
-/** 阶梯系数：完成率/按时率 → 折算比例 */
-function stepFactor(p) {
-  if (p >= 95) return 1;
-  if (p >= 90) return 0.9;
-  if (p >= 80) return 0.75;
-  if (p >= 70) return 0.6;
-  return 0.4;
-}
-/** 门店考核得分（依据考核设置） */
+/** 门店考核得分（依据考核设置）—— 计算在 util.js 的 assessScore 里，便于单测 */
 function storeAssessScore(c, cfg) {
-  cfg = cfg || getAssessCfg();
-  const cw = Number(cfg.completionWeight) || 0;
-  const ow = Number(cfg.ontimeWeight) || 0;
-  const basePart = Math.max(0, (Number(cfg.base) || 0) - cw - ow); // 剩余基础分
-  const cScore = cfg.mode === 'step' ? cw * stepFactor(c.rate) : cw * c.rate / 100;
-  const oScore = cfg.mode === 'step' ? ow * stepFactor(c.ontimeRate) : ow * c.ontimeRate / 100;
-  const deduct = (c.late || 0) * (Number(cfg.lateSubmitDeduct) || 0) + (c.missed || 0) * (Number(cfg.overdueMissDeduct) || 0);
-  const total = basePart + cScore + oScore - deduct;
-  return {
-    basePart, cScore, oScore, deduct,
-    lateN: c.late || 0, missN: c.missed || 0,
-    total: Math.round(Math.max(0, total) * 10) / 10,
-    pass: total >= (Number(cfg.passLine) || 0)
-  };
+  return assessScore(cfg || getAssessCfg(), c);
 }
 /** 需求责任人考核得分（超期 / 被退回重做 扣分） */
 function personAssessScore(x, cfg, window) {
@@ -1027,3 +1031,4 @@ function personAssessScore(x, cfg, window) {
   const total = Math.round(Math.max(0, 100 - deduct) * 10) / 10;
   return { reopenN, deduct, total, pass: total >= (Number(cfg.passLine) || 0) };
 }
+

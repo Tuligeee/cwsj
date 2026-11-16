@@ -93,6 +93,9 @@ function trimDemands(actor, all) {
   return all.filter(d => (d.assign && d.assign.toId === actor.id) || d.deletedBy === actor.id);
 }
 
+/* 隐私任务的可见性判定与脱敏：规则与实现都在 src/privacy.js（纯函数，有单测） */
+const { canSeeTask, redactTask, stripRecord } = require('./privacy');
+
 app.get('/api/bootstrap', requireAuth, (req, res) => {
   const st = getState();
   if (!st) return res.status(500).json({ ok: false, msg: '数据未初始化' });
@@ -104,7 +107,20 @@ app.get('/api/bootstrap', requireAuth, (req, res) => {
     log(req.actor.id, 'split.read.fail', e.message);
   }
   const visible = trimDemands(req.actor, base.demands);
-  const state = Object.assign({}, base, { demands: visible });
+  /* 隐私任务：看不到的换成脱敏存根；对应的提交记录去掉内容和图片。
+     门店只看得到自己店的记录（2026-11-16 顺手修的越权）。 */
+  const privIds = new Set();
+  const tasks = (base.tasks || []).map((t) => {
+    if (canSeeTask(req.actor, t)) return t;
+    privIds.add(t.id);
+    return redactTask(t);
+  });
+  const records = (base.records || []).map((r) => {
+    if (privIds.has(r.taskId)) return stripRecord(r);
+    if (req.actor.isStore && r.storeId !== req.actor.id) return stripRecord(r);
+    return r;
+  });
+  const state = Object.assign({}, base, { demands: visible, tasks: tasks, records: records });
   res.json({ ok: true, version: st.version, updatedAt: st.updatedAt, state: state, me: req.actor });
 });
 
@@ -130,6 +146,35 @@ app.put('/api/state', requireAuth, (req, res) => {
   if (cur && !(req.body && req.body.forceRecords === true && req.actor.isAdmin)) {
     data.records = cur.state.records;
   }
+
+  /* 隐私任务回写合并（2026-11-16）：看不到的任务一律沿用服务端版本，
+     否则别的总部保存一次整份数据，就会把发布人的隐私任务连同提交记录一起删掉。 */
+  if (cur && Array.isArray(cur.state.tasks)) {
+    const prevTasks = cur.state.tasks;
+    const inTasks = Array.isArray(data.tasks) ? data.tasks : [];
+    const inMap = new Map(inTasks.map((t) => [t && t.id, t]));
+    const merged = prevTasks.map((old) => {
+      if (!canSeeTask(req.actor, old)) return old;       // 看不到 → 一律服务端说了算
+      const nt = inMap.get(old.id);
+      if (!nt || nt.redacted) return old;                // 没带 / 带回来的是脱敏存根 → 保留原文
+      return nt;
+    });
+    inTasks.forEach((nt) => {
+      if (!nt || nt.redacted || !nt.id) return;
+      if (prevTasks.some((p) => p.id === nt.id)) return;
+      if (req.actor.isAdmin || nt.creatorId === req.actor.id) merged.unshift(nt);
+    });
+    data.tasks = merged;
+  }
+
+  /* 被新加进「可见人」的人收一条站内消息（规则见 visibility.js） */
+  try {
+    if (cur && Array.isArray(cur.state.tasks) && Array.isArray(data.tasks)) {
+      const oldMap = new Map(cur.state.tasks.map((t) => [t.id, t]));
+      const vis = require('./visibility');
+      data.tasks.forEach((nt) => vis.notifyNewVisible(oldMap.get(nt && nt.id), nt));
+    }
+  } catch (e) { console.error('visibility.hook', e.message); }
 
   /* 需求删除校验（2026-10-29）：软删除 + 权限 + 状态限制 + 审计 */
   {
@@ -734,18 +779,58 @@ app.post('/api/record/submit', requireAuth, (req, res) => {
   }
   const nowIso = new Date().toISOString();
   const late = new Date(nowIso).getTime() > due.getTime() + 60000;
+
+  /* 2026-11-13：前端 30 张，服务端还写死 6 张 → 门店传 21 张只存 6 张（苏州一店反馈）。对齐到 30。
+     2026-11-16：超限不再静默截断——截断会让门店以为交上了（旧版正是如此），改成直接拒绝并说清楚收到几张。 */
+  const MAX_IMAGES = 30, MAX_LINKS = 30;
+  if (Array.isArray(images) && images.length > MAX_IMAGES) {
+    return res.status(400).json({
+      ok: false,
+      msg: '一次最多 ' + MAX_IMAGES + ' 张图片（本次收到 ' + images.length + ' 张），请删掉多余的再提交',
+    });
+  }
+  if (Array.isArray(links) && links.length > MAX_LINKS) {
+    return res.status(400).json({
+      ok: false,
+      msg: '一次最多 ' + MAX_LINKS + ' 个链接（本次收到 ' + links.length + ' 个），请删掉多余的再提交',
+    });
+  }
   const payload = {
     text: String(text).trim(),
-    images: Array.isArray(images) ? images.slice(0, 6) : [],
-    links: Array.isArray(links) ? links.slice(0, 6) : [],
+    images: Array.isArray(images) ? images.slice(0, MAX_IMAGES) : [],
+    links: Array.isArray(links) ? links.slice(0, MAX_LINKS) : [],
   };
 
   if (!Array.isArray(state.records)) state.records = [];
   const idx = state.records.findIndex((r) => r.taskId === taskId && r.storeId === storeId && r.periodKey === key);
+  /* 2026-11-14：判定已定案（不要求重做，含所有每日任务）→ 本期不允许再提交，
+     否则前端藏了按钮、旧页面或接口直调还能把结论盖掉 */
+  if (idx >= 0) {
+    const openV = ((state.records[idx].verdicts) || []).filter((v) => !v.resolvedAt).pop();
+    if (openV && openV.needRedo !== true) {
+      return res.status(400).json({
+        ok: false,
+        msg: (task.cycle === 'daily' ? '每日任务被判定后不支持重新提交' : '这一期已被判定，且不要求重做，不能再提交')
+          + '；如有异议请联系发布人',
+      });
+    }
+  }
   let rec;
+  let resolvedVerdict = null;
   if (idx >= 0) {
     rec = state.records[idx];
     Object.assign(rec, payload, { doneAt: nowIso, late, editedAt: nowIso });
+    /* 2026-11-14 判定整改：门店重交即视为已按判定整改，结掉未结的判定。
+       判定条目保留在 rec.verdicts 里 —— 警告/不合格次数要永久计入考核，不能删。 */
+    if (Array.isArray(rec.verdicts)) {
+      const open = rec.verdicts.filter((v) => !v.resolvedAt).pop();
+      if (open) {
+        open.resolvedAt = nowIso;
+        open.resolvedBy = req.actor.id;
+        open.resolvedLate = late;
+        resolvedVerdict = open;
+      }
+    }
   } else {
     rec = Object.assign({
       id: _recId(), taskId, storeId, periodKey: key, due: due.toISOString(),
@@ -761,8 +846,8 @@ app.post('/api/record/submit', requireAuth, (req, res) => {
   /* 关键：原子接口也必须镜像到拆表，否则页面（读拆表）看不到这条记录（2026-10-30 线上事故） */
   try { split.syncToTables(state); } catch (e) { console.error('split.sync.fail', e.message); }
   if (_beforeSync) { try { require('./changelog').commit(_beforeSync, state, req.actor.id); } catch (e) {} }
-  log(req.actor.id, 'record.submit', `${taskId}/${key}${late ? ' 逾期' : ''}`);
-  res.json({ ok: true, record: rec, version: next });
+  log(req.actor.id, 'record.submit', `${taskId}/${key}${late ? ' 逾期' : ''}${resolvedVerdict ? ' · 已整改' : ''}`);
+  res.json({ ok: true, record: rec, version: next, resolvedVerdict: resolvedVerdict });
 });
 
 /* 撤销完成 */
@@ -774,6 +859,13 @@ app.post('/api/record/revoke', requireAuth, (req, res) => {
   const st = getState();
   if (!st) return res.status(500).json({ ok: false, msg: '数据未初始化' });
   const state = st.state;
+  /* 2026-11-14：已被判定的提交不允许撤销 —— 否则门店点一下撤销就能把警告/不合格抹掉 */
+  const target = (state.records || []).find(
+    (r) => r.taskId === taskId && r.storeId === req.actor.id && r.periodKey === String(periodKey)
+  );
+  if (target && (target.verdicts || []).some((v) => !v.resolvedAt)) {
+    return res.status(400).json({ ok: false, msg: '这一期已被判定，不能撤销提交；请直接重新提交整改内容' });
+  }
   const before = (state.records || []).length;
   state.records = (state.records || []).filter(
     (r) => !(r.taskId === taskId && r.storeId === req.actor.id && r.periodKey === String(periodKey))
@@ -789,6 +881,68 @@ app.post('/api/record/revoke', requireAuth, (req, res) => {
   if (_beforeSync) { try { require('./changelog').commit(_beforeSync, state, req.actor.id); } catch (e) {} }
   log(req.actor.id, 'record.revoke', `${taskId}/${periodKey}`);
   res.json({ ok: true, version: next });
+});
+
+/* ---------------- 判定：不合格 / 警告（2026-11-14） ----------------
+   不合格 = 做了但没达到要求，必须写原因；
+   警告   = 没做却点了提交，不写原因（语义固定）；
+   两种都可以要求重做（每日任务除外 —— 次日就是新一期，重做没有意义）。
+   重做窗口 24 小时，从判定时刻起算；门店重交后判定自动结案，但次数永久保留。 */
+const VERDICT_REDO_MS = 24 * 3600 * 1000;
+
+app.post('/api/record/verdict', requireAuth, (req, res) => {
+  const a = req.actor || {};
+  if (!a.isHq) return res.status(403).json({ ok: false, msg: '只有总部账号可以判定' });
+  const { taskId, storeId, periodKey, kind, reason, needRedo } = req.body || {};
+  if (!taskId || !storeId || !periodKey) return res.status(400).json({ ok: false, msg: '缺少任务、门店或周期标识' });
+  if (kind !== 'fail' && kind !== 'warn') return res.status(400).json({ ok: false, msg: '判定类型只能是 fail（不合格）或 warn（警告）' });
+
+  const st = getState();
+  if (!st) return res.status(500).json({ ok: false, msg: '数据未初始化' });
+  const state = st.state;
+  const task = (state.tasks || []).find((t) => t.id === taskId);
+  if (!task) return res.status(404).json({ ok: false, msg: '任务不存在' });
+  if (task.creatorId !== a.id && !a.isAdmin && !a.isCommittee) {
+    return res.status(403).json({ ok: false, msg: '只有任务发布人、管理员或管委会可以判定' });
+  }
+  /* 隐私任务：只有发布人 + 管理员能判定（2026-11-16） */
+  if (task.privacy && !(task.creatorId === a.id || a.isAdmin)) {
+    return res.status(403).json({ ok: false, msg: '隐私任务只有发布人和管理员可以判定' });
+  }
+  const rec = (state.records || []).find(
+    (r) => r.taskId === taskId && r.storeId === storeId && r.periodKey === String(periodKey)
+  );
+  if (!rec) return res.status(400).json({ ok: false, msg: '这一期门店还没提交，不能判定（没交就是逾期，系统自己算）' });
+  if ((rec.verdicts || []).some((v) => !v.resolvedAt)) {
+    return res.status(400).json({ ok: false, msg: '这一期已有未结案的判定，请等门店整改后再判定' });
+  }
+  const why = String(reason || '').trim();
+  if (kind === 'fail' && !why) return res.status(400).json({ ok: false, msg: '判定不合格必须写原因' });
+
+  const daily = task.cycle === 'daily';
+  const redo = !daily && needRedo !== false;
+  const nowIso = new Date().toISOString();
+  const v = {
+    kind: kind,
+    at: nowIso,
+    by: a.id,
+    byName: a.name || '',
+    reason: kind === 'fail' ? why : '',
+    needRedo: redo,
+    redoDue: redo ? new Date(Date.now() + VERDICT_REDO_MS).toISOString() : null,
+    resolvedAt: null,
+  };
+  if (!Array.isArray(rec.verdicts)) rec.verdicts = [];
+  rec.verdicts.push(v);
+
+  const next = st.version + 1;
+  const _beforeSync = (function () { try { return require('./changelog').capture(state); } catch (e) { return null; } })();
+  db.prepare("UPDATE state_doc SET version = ?, data = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE id = 1")
+    .run(next, JSON.stringify(state), req.actor.id);
+  try { split.syncToTables(state); } catch (e) { console.error('split.sync.fail', e.message); }
+  if (_beforeSync) { try { require('./changelog').commit(_beforeSync, state, req.actor.id); } catch (e) {} }
+  log(req.actor.id, kind === 'warn' ? 'record.warn' : 'record.reject', `${taskId}/${storeId}/${periodKey}${redo ? ' · 要求重做' : ''}`);
+  res.json({ ok: true, verdict: v, version: next });
 });
 
 /* ---------------- 任务批量导入（独立模块，代码全在 import-module/ 里） ---------------- */
@@ -812,3 +966,6 @@ app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
   console.log(`[cwsj] 数据库      ${DB_PATH}`);
   console.log(`[cwsj] 种子导入    ${info.seeded ? `完成（门店 ${info.stores} / 总部 ${info.hq}）` : '已有数据，跳过'}`);
 });
+
+
+

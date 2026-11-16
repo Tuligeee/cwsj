@@ -6,6 +6,7 @@ const STATUS_META = {
   normal: { cls: '', label: '进行中', tag: 'tag-gray', cd: 'cd-normal' },
   due: { cls: 'st-due', label: '即将到期', tag: 'tag-yellow', cd: 'cd-due' },
   overdue: { cls: 'st-overdue', label: '已逾期', tag: 'tag-red', cd: 'cd-over' },
+  rejected: { cls: 'st-overdue', label: '待重做', tag: 'tag-red', cd: 'cd-over' },
   done: { cls: 'st-done', label: '已完成', tag: 'tag-green', cd: 'cd-done' },
   late: { cls: 'st-done', label: '逾期完成', tag: 'tag-yellow', cd: 'cd-done' },
   na: { cls: '', label: '不适用', tag: 'tag-gray', cd: 'cd-normal' }
@@ -21,6 +22,13 @@ function renderTaskCard(item, opts) {
   const m = item.later
     ? { cls: '', label: (String(t.showFrom || '') + ' 开始'), tag: 'tag-gray', cd: 'cd-normal' }
     : (item.notStarted ? { cls: '', label: '待生效', tag: 'tag-gray', cd: 'cd-normal' } : (STATUS_META[item.status] || STATUS_META.normal));
+  /* 判定后：需要重做的统一显示「待重做」；已定案（不要求重做，含每日任务）显示「未完成」 */
+  const _v0 = item.rec ? openVerdict(item.rec) : null;
+  if (_v0) {
+    m.label = _v0.needRedo ? '待重做' : '未完成';
+    m.tag = _v0.needRedo ? 'tag-red' : 'tag-gray';
+    m.cls = 'st-overdue';
+  }
   /* 整卡可点进详情（2026-11-06）：取消底部「详情」按钮 */
   const card = h('div', {
     class: 'task-card ' + m.cls, dataset: { taskId: t.id || '' },
@@ -82,21 +90,34 @@ function renderTaskCard(item, opts) {
 
   /* 底部 */
   const firstDue = item.notStarted ? firstDueAfter(t) : null;
+  const theVerdict = item.rec ? openVerdict(item.rec) : null;
   const cd = h('span', { class: 'countdown ' + m.cd },
-    item.later
-      ? (String(t.showFrom || '') + ' 开始显示 · 今日截止 ' + ymdhm(item.due))
-      : (item.notStarted
-        ? ('生效 ' + (t.startDate || '—') + (firstDue ? ' · 首次到期 ' + ymdhm(firstDue) : ''))
-        : (item.rec ? ('完成于 ' + ymdhm(item.rec.doneAt)) : (ymdhm(item.due) + ' · ' + countdown(item.due)))));
+    theVerdict
+      ? (theVerdict.needRedo && theVerdict.redoDue
+        ? ('判定不合格 · 请于 ' + ymdhm(new Date(theVerdict.redoDue)) + ' 前重做并重新提交')
+        : '发布人已判定不合格，本次不要求重做')
+      : (item.later
+        ? (String(t.showFrom || '') + ' 开始显示 · 今日截止 ' + ymdhm(item.due))
+        : (item.notStarted
+          ? ('生效 ' + (t.startDate || '—') + (firstDue ? ' · 首次到期 ' + ymdhm(firstDue) : ''))
+          : (item.rec ? ('完成于 ' + ymdhm(item.rec.doneAt)) : (ymdhm(item.due) + ' · ' + countdown(item.due))))));
   const footLeft = h('div', { class: 'row' }, [
-    h('span', { class: 'fhint', style: { margin: '0' }, text: item.notStarted ? '本期状态：' : (t.cycle === 'daily' ? '今日截止：' : (t.cycle === 'once' ? '截止时间：' : '本期截止：')) }),
+    h('span', { class: 'fhint', style: { margin: '0' }, text: item.notStarted ? '本期状态：' : (theVerdict ? '当前状态：' : (t.cycle === 'daily' ? '今日截止：' : (t.cycle === 'once' ? '截止时间：' : '本期截止：'))) }),
     cd
   ]);
   const btns = h('div', { class: 'row' });
   if (opts.mode === 'store') {
     if (item.rec) {
-      btns.appendChild(h('button', { class: 'btn btn-sm', onclick: () => openDoneModal(item, opts.onDone) }, '修改提交'));
-      btns.appendChild(h('button', {
+      /* 判定已定案（不要求重做，含所有每日任务）→ 本期不再给提交入口：
+         每日任务按规则不给重做，其它任务判了"不要求重做"就是结论，也不再开放提交 */
+      if (!theVerdict || theVerdict.needRedo) {
+        btns.appendChild(h('button', {
+          class: theVerdict ? 'btn btn-sm btn-primary' : 'btn btn-sm',
+          onclick: () => openDoneModal(item, opts.onDone)
+        }, theVerdict ? '重做并重新提交' : '修改提交'));
+      }
+      /* 已被判定的提交不允许撤销（否则一击撤销就能抹掉警告），服务端也会拒绝 */
+      if (!theVerdict) btns.appendChild(h('button', {
         class: 'btn btn-sm btn-ghost', onclick: () => confirmDialog({
           title: '撤销提交', message: '撤销后该任务回到「未完成」状态，会重新进入逾期/临期统计。确定继续？',
           danger: true, okText: '确定撤销',
@@ -118,15 +139,21 @@ function renderTaskCard(item, opts) {
 /* ---------------- 提交完成弹窗 ---------------- */
 function openDoneModal(item, onDone) {
   const t = item.task;
+  /* 2026-11-13：「修改提交」原来开的是空表单，一点保存就把上一次的说明和图片整条覆盖成空
+     （苏州一店 17:48 交的 20 张图，21:39 再交一次后变成 0 张）→ 编辑必须回填 */
+  const editing = item.rec || null;
   const text = textareaNode({ placeholder: '填写完成情况说明，例如：已完成全部 3 台机器自检，2 号机出卡偶发延迟已报修。', rows: '4' });
-  const images = [];
-  const links = [];
+  if (editing && editing.text) text.value = editing.text;
+  const images = (editing && Array.isArray(editing.images)) ? editing.images.slice() : [];
+  const links = (editing && Array.isArray(editing.links))
+    ? editing.links.map(l => ({ title: l.title || '', url: l.url || '' }))
+    : [];
   const up = imgUploader(images, null, 30);
   const le = linkEditor(links, null);
   const requireImg = (t.priority >= 4);
 
   const inst = openModal({
-    title: '提交任务完成情况',
+    title: editing ? '修改提交内容' : '提交任务完成情况',
     sub: t.title + '　|　' + cycleDesc(t),
     body: h('div', {}, [
       h('div', {
@@ -140,7 +167,8 @@ function openDoneModal(item, onDone) {
       ]),
       fgroup('完成说明', text, null, true),
       fgroup('图片凭证', up, requireImg ? '该任务重要程度 ' + t.priority + ' 星，建议上传现场照片' : null),
-      fgroup('相关链接（可选）', le, '可填写报表、工单、在线文档等链接')
+      fgroup('相关链接（可选）', le, '可填写报表、工单、在线文档等链接'),
+      editing ? h('div', { class: 'fhint', style: { margin: '6px 0 0' }, text: '本次是对 ' + ymdhm(editing.doneAt) + ' 那次提交的修改，原有说明和图片已带出，删掉的内容不会保留' }) : null
     ]),
     footer: [
       h('button', { class: 'btn', onclick: () => inst.close() }, '取消'),
@@ -151,14 +179,14 @@ function openDoneModal(item, onDone) {
           try {
             await submitDone(t.id, me.id, item.key, { text: txt, images: images.slice(), links: links.filter(l => l.url) });
             inst.close();
-            toast('提交成功' + (item.status === 'overdue' ? '（本次为逾期补交）' : ''), 'ok');
+            toast(editing ? '已保存修改' : ('提交成功' + (item.status === 'overdue' ? '（本次为逾期补交）' : '')), 'ok');
             onDone && onDone();
           } catch (e) {
             /* 提交失败绝不关弹窗：内容要留在页面上，让人能重试 */
             toast('提交失败：' + e.message + '（内容仍在本页）', 'err');
           }
         }
-      }, item.status === 'overdue' ? '逾期补交' : '提交完成')
+      }, editing ? '保存修改' : (item.status === 'overdue' ? '逾期补交' : '提交完成'))
     ]
   });
 }
@@ -229,6 +257,109 @@ function storeTaskHistory(task, days, storeId) {
   return out.sort((a, b) => b.due - a.due);
 }
 
+/* ================= 判定：不合格 / 警告（2026-11-14） =================
+   总部在「门店提交记录」里逐期判定：
+     · 不合格：必须写原因，可要求 24 小时内重做（每日任务不支持）
+     · 警告：认定「没做却点了提交」，不写原因，可要求重做，确认后不可撤回
+   判定后门店重交即自动结案；次数永久保留，进考核（警告按次扣分）。 */
+function verdictBar(t, storeId, rec) {
+  const v = openVerdict(rec);
+  if (v) {
+    const warn = v.kind === 'warn';
+    const overdue = v.needRedo && v.redoDue && new Date(v.redoDue).getTime() < Date.now();
+    return h('div', { class: 'rec-verdict', style: { marginTop: '8px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } }, [
+      tagNode(warn ? '已警告' : '已判不合格', 'tag-red'),
+      h('span', { class: 'fhint', style: { margin: '0' },
+        text: (v.reason ? '原因：' + v.reason + ' · ' : '')
+          + (v.needRedo ? ('待重做，截止 ' + ymdhm(new Date(v.redoDue))) : '不要求重做')
+          + (v.byName ? ' · ' + v.byName : '') }),
+      overdue ? tagNode('已超时未重做', 'tag-red') : null
+    ].filter(Boolean));
+  }
+  const daily = t.cycle === 'daily';
+  return h('div', { class: 'rec-verdict', style: { marginTop: '8px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } }, [
+    h('button', {
+      class: 'btn btn-sm',
+      onclick: (e) => { e.stopPropagation(); openVerdictModal(t, storeId, rec, 'fail'); }
+    }, '判定不合格'),
+    h('button', {
+      class: 'btn btn-sm',
+      onclick: (e) => { e.stopPropagation(); openVerdictModal(t, storeId, rec, 'warn'); }
+    }, '标记警告'),
+    daily ? h('span', { class: 'fhint', style: { margin: '0' }, text: '每日任务不支持重做' }) : null
+  ].filter(Boolean));
+}
+
+/** 判定成功后重新取数并重绘当前页（判定落在服务端，本地 state 已过期） */
+async function reloadAfterVerdict() {
+  try {
+    const b = await Api.bootstrap();
+    window.__BOOT_STATE = b.state;
+    window.__BOOT_ME = b.me;
+    loadState();
+    if (typeof go === 'function' && typeof currentRoute !== 'undefined' && currentRoute) go(currentRoute, true);
+  } catch (e) { toast('判定已保存，刷新页面可看到最新状态', 'warn'); }
+}
+
+function openVerdictModal(t, storeId, rec, kind) {
+  const isWarn = kind === 'warn';
+  const daily = t.cycle === 'daily';
+  const store = getStore(storeId);
+  const reason = textareaNode({ rows: '3', value: '', placeholder: '写清哪里不合格、要改成什么样（会原样发给门店）' });
+  let needRedo = !daily;
+  const redoSw = switchNode(needRedo, daily ? '每日任务不支持重做（次日进入新一期）' : '要求在 24 小时内重做', v => { needRedo = v; });
+  if (daily) { redoSw.style.opacity = '.55'; redoSw.style.pointerEvents = 'none'; }
+
+  const chk = h('input', { type: 'checkbox', style: { width: '16px', height: '16px', verticalAlign: '-2px' } });
+  const okBtn = h('button', {
+    class: 'btn btn-primary',
+    onclick: async () => {
+      if (isWarn && !chk.checked) { toast('请先勾选确认', 'err'); return; }
+      if (!isWarn && !String(reason.value || '').trim()) { toast('请填写不合格原因', 'err'); reason.focus(); return; }
+      okBtn.disabled = true;
+      try {
+        await Api.verdictRecord({
+          taskId: t.id, storeId: storeId, periodKey: rec.periodKey,
+          kind: kind, reason: isWarn ? '' : String(reason.value).trim(), needRedo: needRedo
+        });
+        inst.close();
+        await reloadAfterVerdict();
+        toast(isWarn ? '已标记警告' : '已判定不合格，门店会收到通知', 'ok');
+      } catch (e) {
+        okBtn.disabled = false;
+        toast(e.message || '判定失败', 'err');
+      }
+    }
+  }, isWarn ? '标记警告（不可撤回）' : '判定不合格');
+  if (isWarn) { okBtn.disabled = true; okBtn.style.opacity = '.5'; }
+  chk.addEventListener('change', () => {
+    okBtn.disabled = !chk.checked;
+    okBtn.style.opacity = chk.checked ? '1' : '.5';
+  });
+
+  const body = h('div', {}, [
+    h('div', { class: 'fhint', style: { marginBottom: '10px' },
+      text: (store ? store.name + ' · ' : '') + ymd(rec.due ? new Date(rec.due) : new Date())
+        + ' 这一期 · 门店提交于 ' + ymdhm(rec.doneAt) }),
+    isWarn ? null : fgroup('不合格原因', reason, '必填，门店会在钉钉通知里看到', true),
+    h('div', { class: 'sub-group', style: { margin: '0' } }, [redoSw]),
+    isWarn ? h('label', { class: 'row', style: { marginTop: '12px', gap: '8px', alignItems: 'center' } }, [
+      chk, h('span', { text: '我已确认该店本期确实没有执行（标记后不可撤回）' })
+    ]) : null
+  ].filter(Boolean));
+
+  const inst = openModal({
+    title: isWarn ? '标记警告' : '判定不合格',
+    sub: t.title,
+    narrow: true,
+    body: body,
+    footer: [
+      h('button', { class: 'btn', onclick: () => inst.close() }, '取消'),
+      okBtn
+    ]
+  });
+}
+
 function openStoreTaskDetail(t, item, opt) {
   opt = opt || {};
   const sid = opt.storeId || me.id;
@@ -265,8 +396,10 @@ function openStoreTaskDetail(t, item, opt) {
           h('div', { class: 'rec-c', text: CYCLE_LABEL[t.cycle] })
         ]),
         h('div', { class: 'rec-m' }, [
-          h('span', { class: 'rec-s ' + (r.rec ? (r.rec.late ? 'is-late' : 'is-ok') : (r.missed ? 'is-miss' : 'is-wait')),
-            text: r.rec ? (r.rec.late ? '逾期提交' : '按时提交') : (r.missed ? '未提交' : '待提交') }),
+          h('span', { class: 'rec-s ' + (r.rec ? (openVerdict(r.rec) ? 'is-miss' : (r.rec.late ? 'is-late' : 'is-ok')) : (r.missed ? 'is-miss' : 'is-wait')),
+            text: r.rec
+              ? (openVerdict(r.rec) ? (openVerdict(r.rec).kind === 'warn' ? '已警告' : '已判不合格') : (r.rec.late ? '逾期提交' : '按时提交'))
+              : (r.missed ? '未提交' : '待提交') }),
           h('span', { class: 'rec-x', text: r.rec ? (String(r.rec.text || '').split('\n')[0] || '—') : '—' }),
           thumbs
         ]),
@@ -284,6 +417,7 @@ function openStoreTaskDetail(t, item, opt) {
         row.onclick = (ev) => { if (ev.target.closest('a,img')) return; more.style.display = more.style.display === 'none' ? '' : 'none'; };
         item2.appendChild(row);
         item2.appendChild(more);
+        if (!self) item2.appendChild(verdictBar(t, sid, r.rec));
       } else {
         item2.appendChild(row);
       }
@@ -305,15 +439,37 @@ function openStoreTaskDetail(t, item, opt) {
       h('dt', {}, '任务类型'), h('dd', {}, tagNode(CYCLE_LABEL[t.cycle], CYCLE_TAG[t.cycle])),
       h('dt', {}, '截止规则'), h('dd', {}, cycleDesc(t)),
       h('dt', {}, '发布部门'), h('dd', {}, t.dept + ' · ' + t.creatorName),
-      h('dt', {}, '本期状态'), h('dd', {}, h('span', { class: 'row' }, [
-        tagNode(curMeta.label, curMeta.tag),
-        h('span', { class: 'fhint', style: { margin: '0' }, text: '本期截止 ' + ymdhm(curDue) })
-      ])),
+      h('dt', {}, '本期状态'), h('dd', {}, h('span', { class: 'row' }, (function () {
+        const v = curRec ? openVerdict(curRec) : null;
+        if (!v) return [tagNode(curMeta.label, curMeta.tag),
+          h('span', { class: 'fhint', style: { margin: '0' }, text: '本期截止 ' + ymdhm(curDue) })];
+        return [
+          v.needRedo ? tagNode('待重做', 'tag-red') : tagNode('未完成', 'tag-gray'),
+          h('span', { class: 'fhint', style: { margin: '0' },
+            text: v.needRedo && v.redoDue ? ('重做截止 ' + ymdhm(new Date(v.redoDue))) : '本期不再开放提交' })
+        ];
+      })())),
       h('dt', {}, self ? '我提交了没' : '门店提交了没'), h('dd', {}, curRec
         ? h('span', { class: 'rec-state ok', text: '已提交 · ' + ymdhm(curRec.doneAt) + (curRec.late ? ' · 逾期提交' : ' · 按时提交') })
         : h('span', { class: 'rec-state miss', text: curStatus === 'overdue' ? '还没提交（已逾期）' : '还没提交' })),
       h('dt', {}, '提醒规则'), h('dd', {}, desclineText(t))
     ]),
+    (function () {
+      const v = curRec ? openVerdict(curRec) : null;
+      if (!v) return null;
+      const warn = v.kind === 'warn';
+      return h('div', {
+        class: 'done-box',
+        style: { background: '#FDECEC', color: '#8B1D1D', marginTop: '12px' }
+      }, [
+        h('div', { class: 'db-c', style: { fontWeight: '700' },
+          text: warn ? '已被标记「警告」' : ('判定不合格' + (v.needRedo ? ' · 待重做' : '')) }),
+        warn ? null : h('div', { class: 'db-c', text: '原因：' + (v.reason || '—') }),
+        h('div', { class: 'db-c', text: v.needRedo && v.redoDue
+          ? ('请在 ' + ymdhm(new Date(v.redoDue)) + ' 前重新提交（重新提交后判定自动结案）')
+          : '本次不要求重做，如需说明请联系发布人' })
+      ].filter(Boolean));
+    })(),
     t.content ? h('div', { class: 'mt14' }, [h('div', { class: 'fhint', style: { margin: '0 0 6px' }, text: '任务说明' }), h('div', { class: 'tc-body', style: { marginTop: '0' }, text: t.content })]) : null,
     thumbsNode(t.images), linksNode(t.links),
     h('div', { class: 'sub-group' }, [h('h4', {}, self ? '我的提交记录' : '提交记录'), histBox])
@@ -331,10 +487,15 @@ function buildStoreStatusTable(st, task) {
   st.forEach(x => {
     const m = STATUS_META[x.status] || STATUS_META.normal;
     const cell = x.cell || null;
+    /* 判定后标签按判定类型显示：不合格 / 警告（需要重做的再挂一个「待重做」） */
+    const v = (cell && cell.rec) ? openVerdict(cell.rec) : null;
+    const tags = v
+      ? [v.needRedo ? tagNode('待重做', 'tag-red') : tagNode('未完成', 'tag-gray')]
+      : [tagNode(m.label, m.tag)];
     const tr = h('tr', { class: task ? 'clickable' : '' }, [
       h('td', {}, x.store ? x.store.name : '—'),
       h('td', {}, x.store ? x.store.mgr : '—'),
-      h('td', {}, tagNode(m.label, m.tag)),
+      h('td', {}, h('span', { class: 'row', style: { gap: '6px' } }, tags)),
       task ? h('td', { class: 'rec-go' }, '看提交记录 ›') : null
     ]);
     /* 2026-11-09：点门店 → 弹出该门店在这条任务上的提交记录 */
@@ -767,10 +928,14 @@ function openContactEditor(c, onDone) {
 /* =========================================================
    门店端页面
    ========================================================= */
+/* 我的任务页的筛选条件放模块作用域（2026-11-15）：
+   从左侧切「今日 / 本周 / 本月 / 全部」会整页重建，放下标里就会被清空 */
+const _storeTaskFlt = { status: new Set(), dept: new Set() };
+
 function pageStoreTasks() {
   const wrap = h('div');
-  const filterSet = new Set();    // 状态多选（空 = 全部）
-  const creatorSet = new Set();   // 发布人多选（空 = 全部）
+  const filterSet = _storeTaskFlt.status;    // 状态多选（空 = 全部）
+  const creatorSet = _storeTaskFlt.dept;     // 发布部门多选（空 = 全部）
   /* 周期由左侧导航决定（桌面）；手机端仍用顶部药丸，初值兜底今日 */
   let period = (window.__storePeriod || 'today');            // today | week | month | all
   let cycleFilter = (window.__storeCycle === 'once') ? 'once' : 'all';
@@ -840,8 +1005,10 @@ function pageStoreTasks() {
     let items = cycleFilter === 'once' ? onceItems() : baseItems();
     if (filterSet.size) {
       const stOk = x => x.status === 'done' || x.status === 'late';
+      const stRedo = x => { const v = x.rec ? openVerdict(x.rec) : null; return !!v && v.needRedo; };
       items = items.filter(x =>
-        (filterSet.has('unfinished') && !stOk(x)) ||
+        (filterSet.has('unfinished') && !stOk(x) && !stRedo(x)) ||
+        (filterSet.has('redo') && stRedo(x)) ||
         (filterSet.has('finished') && stOk(x)) ||
         filterSet.has(x.status));
     }
@@ -864,6 +1031,7 @@ function pageStoreTasks() {
     const doneN = base.filter(x => x.status === 'done' || x.status === 'late').length;
     const overdueN = base.filter(x => x.status === 'overdue').length;
     const dueN = base.filter(x => x.status === 'due').length;
+    const redoN = base.filter(x => x.status === 'rejected' && openVerdict(x.rec) && openVerdict(x.rec).needRedo).length;
 
     const bar = h('div', { class: 'flt-bar' });
 
@@ -873,12 +1041,13 @@ function pageStoreTasks() {
       class: 'tab' + (filterSet.size === 0 ? ' active' : ''),
       onclick: () => { filterSet.clear(); paint(); }
     }, [h('span', { text: '全部状态' }), h('span', { class: 'cnt' }, String(base.length))]));
-    [['unfinished', '未完成', base.length - doneN],
+    [['unfinished', '未完成', base.length - doneN - redoN],
      ['due', '即将到期', dueN],
      ['overdue', '已逾期', overdueN],
-     ['finished', '已完成', doneN]].forEach(([k, label, n]) => {
+     ['finished', '已完成', doneN],
+     ['redo', '待重做', redoN]].forEach(([k, label, n]) => {
       segTabs.appendChild(h('div', {
-        class: 'tab' + (filterSet.has(k) ? ' active' : ''),
+        class: 'tab' + (filterSet.has(k) ? ' active' : '') + (k === 'redo' ? ' tab-redo' : ''),
         onclick: () => { filterSet.has(k) ? filterSet.delete(k) : filterSet.add(k); paint(); }
       }, [h('span', { text: label }), h('span', { class: 'cnt' }, String(n))]));
     });
@@ -908,7 +1077,7 @@ function pageStoreTasks() {
     /* 手机端：三颗药丸 + 底部弹层（与总部一致） */
     function buildMobileFilters() {
       const stText = filterSet.size === 0 ? '全部'
-        : filterSet.size === 1 ? ({ unfinished: '未完成', due: '即将到期', overdue: '已逾期', finished: '已完成' }[Array.from(filterSet)[0]] || '已选')
+        : filterSet.size === 1 ? ({ unfinished: '未完成', redo: '待重做', due: '即将到期', overdue: '已逾期', finished: '已完成' }[Array.from(filterSet)[0]] || '已选')
           : '已选 ' + filterSet.size + ' 项';
       const cycText = cycleFilter === 'once' ? '专项' : ({ today: '今日', week: '本周', month: '本月', all: '全部' }[period] || '今日');
       const cText = creatorSet.size === 0 ? '全部'
@@ -919,8 +1088,8 @@ function pageStoreTasks() {
           label: '状态', value: stText, active: filterSet.size > 0, count: filterSet.size || '',
           onClick: () => openFilterSheet({
             title: '任务状态', multi: true,
-            options: [['unfinished', '未完成', base.length - doneN], ['due', '即将到期', dueN],
-                      ['overdue', '已逾期', overdueN], ['finished', '已完成', doneN]]
+            options: [['unfinished', '未完成', base.length - doneN - redoN], ['due', '即将到期', dueN],
+                      ['overdue', '已逾期', overdueN], ['finished', '已完成', doneN], ['redo', '待重做', redoN]]
               .map(([k, t, n]) => ({ v: k, t: t, n: n })),
             selected: filterSet, onChange: () => paint()
           })
@@ -1067,26 +1236,30 @@ function pageAllTasks() {
     const doneN = base.filter(x => x.status === 'done' || x.status === 'late').length;
     const overdueN = base.filter(x => x.status === 'overdue').length;
     const dueN = base.filter(x => x.status === 'due').length;
+    const redoN = base.filter(x => x.status === 'rejected' && openVerdict(x.rec) && openVerdict(x.rec).needRedo).length;
     clear(tabsBar);
     const defs = [
-      ['unfinished', '未完成', base.length - doneN],
+      ['unfinished', '未完成', base.length - doneN - redoN],
       ['due', '即将到期', dueN],
       ['overdue', '已逾期', overdueN],
-      ['finished', '已完成', doneN]
+      ['finished', '已完成', doneN],
+      ['redo', '待重做', redoN]
     ];
     tabsBar.appendChild(h('div', {
       class: 'tab' + (filterSet.size === 0 ? ' active' : ''),
       onclick: () => { filterSet.clear(); paint(); }
     }, [h('span', { text: '全部状态' }), h('span', { class: 'cnt' }, String(base.length))]));
     defs.forEach(([k, label, n]) => tabsBar.appendChild(h('div', {
-      class: 'tab' + (filterSet.has(k) ? ' active' : ''), onclick: () => { filterSet.has(k) ? filterSet.delete(k) : filterSet.add(k); paint(); }
+      class: 'tab' + (filterSet.has(k) ? ' active' : '') + (k === 'redo' ? ' tab-redo' : ''), onclick: () => { filterSet.has(k) ? filterSet.delete(k) : filterSet.add(k); paint(); }
     }, [label, h('span', { class: 'cnt' }, String(n))])));
 
     const stOk = x => x.status === 'done' || x.status === 'late';
+    const stRedo2 = x => { const v = x.rec ? openVerdict(x.rec) : null; return !!v && v.needRedo; };
     let items = base;
     if (filterSet.size) {
       items = base.filter(x =>
-        (filterSet.has('unfinished') && !stOk(x)) ||
+        (filterSet.has('unfinished') && !stOk(x) && !stRedo2(x)) ||
+        (filterSet.has('redo') && stRedo2(x)) ||
         (filterSet.has('finished') && stOk(x)) ||
         filterSet.has(x.status));
     }
@@ -1280,7 +1453,8 @@ function pageStoreStats() {
     ]));
     body.appendChild(h('div', { class: 'fhint', style: { margin: '-4px 0 4px' },
       text: '得分 = 基础 ' + asc.basePart + ' + 完成率得分 ' + asc.cScore.toFixed(1) + ' + 按时率得分 ' + asc.oScore.toFixed(1)
-        + ' − 扣分 ' + asc.deduct + '（逾期提交 ' + asc.lateN + ' 次、逾期未交 ' + asc.missN + ' 次）· 规则由管理公司在「考核设置」中配置' }));
+        + ' − 扣分 ' + asc.deduct + '（逾期提交 ' + asc.lateN + ' 次、逾期未交 ' + asc.missN + ' 次'
+        + (asc.warnN ? '、警告 ' + asc.warnN + ' 次' : '') + '）· 规则由管理公司在「考核设置」中配置' }));
 
     const grid = h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' } });
     grid.appendChild(h('div', { class: 'card' }, [
@@ -1381,3 +1555,9 @@ function pageMore() {
     isStore() ? '其余页面在底部导航里' : '通讯录、数据统计、管理员后台放在这里；常用三页在底部导航'));
   return wrap;
 }
+
+
+
+
+
+

@@ -121,6 +121,14 @@ function occurrence(task, now) {
   return { key: dl ? ymd(dl) : ymd(t), due: dl || atTime(t, task.time) };
 }
 
+/* ---------- 判定（不合格 / 警告，2026-11-14） ---------- */
+/** 未结案的判定（最新一条），没有返回 null */
+function openVerdict(rec) {
+  const arr = (rec && rec.verdicts) || [];
+  for (let i = arr.length - 1; i >= 0; i--) if (!arr[i].resolvedAt) return arr[i];
+  return null;
+}
+
 /* ---------- 收件人 ---------- */
 function dingOf(userId) {
   const m = db.prepare('SELECT ding_userid FROM ding_map WHERE user_id = ?').get(userId);
@@ -152,6 +160,7 @@ function sentToday(personId) {
 /* ---------- 夜间积压放行：单条直发，多条合并汇总 ---------- */
 const SCEN_CN = {
   A1: '新任务', A2: '任务临期', A3: '任务已逾期', A4: '任务催办', A5: '门店已提交',
+  A6: '任务判定不合格', A7: '任务被警告', A8: '门店已重做提交',
   B1: '新需求待评估', B2: '需求待派发', B3: '需求被驳回', B4: '派给你的需求',
   B5: '需求待你确认', B6: '门店已确认', B7: '需求被退回', B8: '需求临近完成日',
   C1: '需求超期未处理', C2: '需求待评估超时', C3: '需求待确认超时',
@@ -333,23 +342,73 @@ function build(now) {
             }
           }
         }
-      } else if (rec.doneAt && task.creatorId && (now - new Date(rec.doneAt)) < 24 * 3600000) {
-        /* A5 门店已提交 → 通知任务创建人 */
-        const creator = (state.hq || []).find(h => h.id === task.creatorId);
-        const cd = creator ? hqDing(creator) : dingOf(task.creatorId);
-        if (cd) {
-          push({
-            key: 'A5|' + task.id + '|' + storeId + '|' + occ.key,   /* 当天只通知一次，改提交不再重发 */
-            scenario: 'A5', entityId: task.id,
-            to: { id: task.creatorId, name: creator ? creator.name : '创建人', ding: cd },
-            title: '门店已提交任务',
-            body: ['**门店已提交任务**', '',
-              '- 任务：' + task.title,
-              '- 门店：' + store.name,
-              '- 提交人：' + (rec.by || store.mgr || '—'),
-              '- 时间：' + fmt(new Date(rec.doneAt)), '',
-              '[查看进度明细](' + taskLink(task.id) + ')'].join('\n'),
-          });
+      } else {
+        /* ---- 已提交：A5 / A6 不合格 / A7 警告 / A8 重做已交 ---- */
+        if (rec.doneAt && task.creatorId && (now - new Date(rec.doneAt)) < 24 * 3600000) {
+          /* A5 门店已提交 → 通知任务创建人 */
+          const creator = (state.hq || []).find(h => h.id === task.creatorId);
+          const cd = creator ? hqDing(creator) : dingOf(task.creatorId);
+          if (cd) {
+            push({
+              key: 'A5|' + task.id + '|' + storeId + '|' + occ.key,   /* 当天只通知一次，改提交不再重发 */
+              scenario: 'A5', entityId: task.id,
+              to: { id: task.creatorId, name: creator ? creator.name : '创建人', ding: cd },
+              title: '门店已提交任务',
+              body: ['**门店已提交任务**', '',
+                '- 任务：' + task.title,
+                '- 门店：' + store.name,
+                '- 提交人：' + (rec.by || store.mgr || '—'),
+                '- 时间：' + fmt(new Date(rec.doneAt)), '',
+                '[查看进度明细](' + taskLink(task.id) + ')'].join('\n'),
+            });
+          }
+        }
+        /* A6 / A7 判定结果 → 通知门店（去重键必须带判定时间戳：
+           否则上线那一刻会把所有历史判定当成新事件补发一遍） */
+        const v = openVerdict(rec);
+        /* 只对 30 天内的判定发通知：notify_log 90 天会清理，没有时间窗的话
+           一条长期没整改的判定会在清理后被当成新事件再发一次 */
+        if (v && (now - new Date(v.at)) < 30 * 86400000) {
+          const warn = v.kind === 'warn';
+          const redoTxt = v.needRedo && v.redoDue ? fmt(new Date(v.redoDue)) : '';
+          push(Object.assign({}, base, {
+            key: (warn ? 'A7|' : 'A6|') + task.id + '|' + storeId + '|' + v.at,
+            scenario: warn ? 'A7' : 'A6', entityId: task.id,
+            title: warn ? '任务被标记「警告」' : '任务被判定「不合格」',
+            body: (warn
+              ? ['**任务被标记「警告」**', '',
+                '- 任务：' + task.title,
+                '- 认定：发布人核对后认为本期没有实际执行',
+                '- 处理：' + (v.needRedo && redoTxt ? ('请在 ' + redoTxt + ' 前重新提交') : '仅记录一次警告，本次不要求重做'), '',
+                '[去查看](' + taskLink(task.id) + ')']
+              : ['**任务被判定「不合格」**', '',
+                '- 任务：' + task.title,
+                '- 原因：' + (v.reason || '—'),
+                '- 处理：' + (v.needRedo && redoTxt ? ('请在 ' + redoTxt + ' 前重做并重新提交') : '本次不要求重做，仅记录'), '',
+                '[去重做并提交](' + taskLink(task.id) + ')']).join('\n'),
+          }));
+        }
+        /* A8 我要求重做的那一期，门店已经重交了 → 通知发布人复查 */
+        const lastResolved = (rec.verdicts || []).filter(x => x.resolvedAt).pop();
+        if (lastResolved && rec.doneAt
+          && new Date(rec.doneAt).getTime() > new Date(lastResolved.at).getTime()
+          && (now - new Date(rec.doneAt)) < 24 * 3600000) {
+          const creator2 = (state.hq || []).find(h => h.id === task.creatorId);
+          const cd2 = creator2 ? hqDing(creator2) : dingOf(task.creatorId);
+          if (cd2) {
+            push({
+              key: 'A8|' + task.id + '|' + storeId + '|' + rec.doneAt,
+              scenario: 'A8', entityId: task.id,
+              to: { id: task.creatorId, name: creator2 ? creator2.name : '创建人', ding: cd2 },
+              title: '门店已按判定重新提交',
+              body: ['**门店已按判定重新提交**', '',
+                '- 任务：' + task.title,
+                '- 门店：' + store.name,
+                '- 原判定：' + (lastResolved.kind === 'warn' ? '警告' : '不合格') + '（' + fmt(new Date(lastResolved.at)) + '）',
+                '- 重交时间：' + fmt(new Date(rec.doneAt)), '',
+                '[去复查](' + taskLink(task.id) + ')'].join('\n'),
+            });
+          }
         }
       }
     });
