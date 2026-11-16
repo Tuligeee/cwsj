@@ -500,6 +500,11 @@ setInterval(async () => {
   finally { _ticking = false; }
 }, 120000);
 
+/* D1「昨日任务未完成」：每天 10:00 把昨天该做没做的发到群（2026-11-16） */
+const groupDaily = require('./group_daily');
+groupDaily.register(app, requireAuth);
+groupDaily.start();
+
 /* ---------------- 任务资源接口（测试环境拆表第一步） ---------------- */
 require('./tasks_api').register(app, requireAuth, log);
 require('./demands_api').register(app, requireAuth, log);
@@ -966,6 +971,7 @@ app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
   console.log(`[cwsj] 数据库      ${DB_PATH}`);
   console.log(`[cwsj] 种子导入    ${info.seeded ? `完成（门店 ${info.stores} / 总部 ${info.hq}）` : '已有数据，跳过'}`);
 });
+
 
 
 
