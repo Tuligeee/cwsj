@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS group_daily_log (
 );
 `);
 
-const LINK_BASE = (process.env.CWSJ_LINK || 'https://mancado.cn/cwsj/cwsj/').replace(/\/?$/, '/');
+const LINK_BASE = (process.env.CWSJ_LINK || 'https://mancado.cn/cwsj/').replace(/\/?$/, '/');
 const K = 'groupDaily';
 const DEF = {
   enabled: 1,
