@@ -254,6 +254,22 @@ function storeTaskHistory(task, days, storeId) {
     if (due.getTime() > now.getTime() && !getRecord(task.id, sid, occKey(task, day))) continue;  /* 还没到的那期不算 */
     push(due);
   }
+  /* 2026-11-16：提前提交（本期还没到期就交了）时，记录挂在"未来那一期"，
+     上面的循环只走过去的日期，永远枚举不到 → 提交记录空白。
+     这里把「已有记录但没被枚举到」的期次补上，用记录自带的 due 还原。 */
+  const seen = new Set(out.map(o => o.key));
+  (state.records || []).forEach(r => {
+    if (r.taskId !== task.id || r.storeId !== sid) return;
+    if (seen.has(r.periodKey)) return;
+    let due = r.due ? new Date(r.due) : null;
+    if (!due || isNaN(due.getTime())) return;
+    if (due.getTime() < from.getTime()) return;   /* 比统计窗口更早的不补 */
+    out.push({
+      due: due, key: r.periodKey, rec: r,
+      status: occStatus(due, task, r, now), missed: false
+    });
+    seen.add(r.periodKey);
+  });
   return out.sort((a, b) => b.due - a.due);
 }
 
