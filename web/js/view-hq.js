@@ -338,11 +338,35 @@ function pageHqTasks() {
   const deptSet = _hqTaskFlt.dept;    // 发布部门多选（空 = 全部）
   /* 任务类型由左侧导航决定（单选取代原来的多选，2026-11-11） */
   const cycleSet = new Set((window.__hqCycle && window.__hqCycle !== 'all') ? [window.__hqCycle] : []);
+  /* 2026-11-16：任务太多，加关键词搜索（标题 / 说明 / 部门 / 发布人 / 门店名，空格分隔多词 AND） */
+  let kw = '';
   const statBox = h('div');
   const scopeBar = h('div', { class: 'm2-toolrow', style: { marginLeft: 'auto' } });
   const tabsBar = h('div', { class: 'tabs chip-tabs seg-track' });
   const cycleBar = h('div', { class: 'tabs chip-tabs' });
   const clearSlot = h('span', { class: 'flt-clear-slot' });
+  /* 搜索框：只建一次，避免 paint 重建导致失焦 */
+  const searchInput = h('input', {
+    class: 'flt-search-inp', type: 'search', placeholder: '搜索任务标题 / 说明 / 部门 / 门店',
+    autocomplete: 'off',
+    oninput: () => { kw = searchInput.value; syncSearchClear(); schedulePaint(); },
+    onkeydown: (e) => { if (e.key === 'Escape') { searchInput.value = ''; kw = ''; syncSearchClear(); paint(); } }
+  });
+  const searchClearBtn = h('button', {
+    class: 'flt-search-x', type: 'button', title: '清除搜索',
+    onclick: () => { searchInput.value = ''; kw = ''; syncSearchClear(); paint(); searchInput.focus(); }
+  }, '×');
+  const searchBox = h('div', { class: 'flt-search' }, [searchInput, searchClearBtn]);
+  function syncSearchClear() {
+    searchClearBtn.style.display = searchInput.value ? 'inline-flex' : 'none';
+  }
+  syncSearchClear();
+  /* 输入防抖：不每敲一个字就整页重绘 */
+  let _kwTimer = null;
+  function schedulePaint() {
+    if (_kwTimer) clearTimeout(_kwTimer);
+    _kwTimer = setTimeout(() => { _kwTimer = null; paint(); }, 180);
+  }
   const listBox = h('div');
   /* 筛选行标签（与任务来源行同宽，保证两行选项左对齐） */
   const statusLabel = null; /* 标签已内联到 .flt-group，保留变量避免旧引用报错 */
@@ -362,11 +386,26 @@ function pageHqTasks() {
     const mineOn = scopeSet.has('mine'), othersOn = scopeSet.has('others');
     return state.tasks.filter(t => !t.redacted && ((mineOn && t.creatorId === me.id) || (othersOn && t.creatorId !== me.id)));
   }
+  /** 关键词命中判断：标题/说明/部门/发布人/门店名，多词空格分隔 = 全部命中 */
+  function kwHit(t, words) {
+    if (!words.length) return true;
+    const storeNames = (t.storeIds || []).map(sid => {
+      const s = (typeof getStore === 'function') ? getStore(sid) : null;
+      return s ? s.name : '';
+    }).join(' ');
+    const hay = [t.title, t.content, t.dept, t.creatorName, storeNames].filter(Boolean).join(' ').toLowerCase();
+    return words.every(w => hay.indexOf(w) >= 0);
+  }
+  function kwWords() {
+    return String(kw || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  }
   function base() {
     let l = sourceItems();
     if (deptSet.size) l = l.filter(t => deptSet.has(t.dept));
     if (cycleSet.size) l = l.filter(t => cycleSet.has(t.cycle));
     if (tabSet.size) l = l.filter(t => (t.status === 'active' ? tabSet.has('active') : tabSet.has('stopped')));
+    const words = kwWords();
+    if (words.length) l = l.filter(t => kwHit(t, words));
     return l.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
 
@@ -399,6 +438,7 @@ function pageHqTasks() {
         class: 'btn btn-sm btn-ghost',
         onclick: () => {
           deptSet.clear(); cycleSet.clear(); tabSet.clear(); tabSet.add('active');
+          kw = ''; if (searchInput) { searchInput.value = ''; syncSearchClear(); }
           if (typeof cycleFilter !== 'undefined' && cycleFilter) cycleFilter.refresh();
           paint();
         }
@@ -508,10 +548,21 @@ function pageHqTasks() {
     const list = base();
     clear(listBox);
     if (!list.length) {
-      listBox.appendChild(emptyNode(scopeSet.size === 0 ? '未选择任务来源，当前没有可显示的任务'
-        : (scopeSet.size === 1 && scopeSet.has('mine') ? '还没有你发布的任务，点击右上角「新建任务」下发'
-          : '当前筛选下没有任务'), null, 'checklist'));
+      listBox.appendChild(emptyNode(
+        kwWords().length ? ('没有匹配「' + kw.trim() + '」的任务')
+          : (scopeSet.size === 0 ? '未选择任务来源，当前没有可显示的任务'
+            : (scopeSet.size === 1 && scopeSet.has('mine') ? '还没有你发布的任务，点击右上角「新建任务」下发'
+              : '当前筛选下没有任务')), null, 'checklist'));
       return;
+    }
+    if (kwWords().length) {
+      listBox.appendChild(h('div', { class: 'kw-hint' }, [
+        h('span', { text: '匹配 ' + list.length + ' 条' }),
+        h('button', {
+          class: 'kw-clear', type: 'button',
+          onclick: () => { kw = ''; if (searchInput) searchInput.value = ''; syncSearchClear(); paint(); }
+        }, '清除搜索')
+      ]));
     }
     const l = h('div', { class: 'task-list' });
     list.forEach(t => l.appendChild(taskAdminCard(t, paintAll)));
@@ -558,13 +609,15 @@ function pageHqTasks() {
     cycleBar.appendChild(cycleFilter.el);
     /* 手机：药丸 + 弹层；桌面：状态底板 + 矩形标签（2026-11-06） */
     if (M2()) {
+      wrap.appendChild(h('div', { class: 'mf-search' }, [searchBox]));
       wrap.appendChild(mfBarBox);
     } else {
       /* 类型已移到左侧导航（桌面端），筛选条只留 状态 / 部门 */
       const bar = h('div', { class: 'flt-bar' }, [
         h('div', { class: 'flt-group flt-seg' }, [h('span', { class: 'flt-gl', text: '状态' }), tabsBar]),
         h('span', { class: 'flt-sep' }),
-        deptBar
+        deptBar,
+        searchBox
       ]);
       wrap.appendChild(bar);
     }

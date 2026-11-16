@@ -2488,3 +2488,29 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 .task-card.is-private .privacy-mark svg{width:100%; height:100%; display:block;}
 .task-card.is-private .tc-head,.task-card.is-private .tc-body,.task-card.is-private .tc-foot{position:relative; z-index:1;}
 
+/* ===== 任务管理搜索（2026-11-16） ===== */
+.flt-bar .flt-search{margin-left:auto;display:inline-flex;align-items:center;gap:4px;position:relative;}
+.flt-search-inp{
+  height:28px;width:240px;padding:0 26px 0 10px;border:1px solid var(--line);border-radius:8px;
+  background:var(--panel);color:var(--text);font-size:12.5px;outline:none;
+  transition:border-color .15s var(--ease),box-shadow .15s var(--ease);
+}
+.flt-search-inp::placeholder{color:var(--text-3);}
+.flt-search-inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-50);}
+.flt-search-inp::-webkit-search-cancel-button{display:none;}
+.flt-search-x{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:16px;height:16px;border:0;border-radius:50%;background:var(--line);color:var(--text-2);
+  font-size:12px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0;
+}
+.flt-search-x:hover{background:var(--text-3);color:#fff;}
+.mf-search{padding:0 0 8px;}
+.mf-search .flt-search{margin-left:0;width:100%;}
+.mf-search .flt-search-inp{width:100%;height:34px;font-size:13.5px;}
+.kw-hint{
+  display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:12.5px;color:var(--text-2);
+}
+.kw-hint .kw-clear{
+  border:0;background:transparent;color:var(--brand);cursor:pointer;font-size:12.5px;padding:0;
+}
+.kw-hint .kw-clear:hover{text-decoration:underline;}
