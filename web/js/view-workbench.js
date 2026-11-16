@@ -1,31 +1,65 @@
 /* =========================================================
-   view-workbench.js — 工作台（左侧导航第一个入口）
+   view-workbench.js — 工作台（任务平台里的工具入口页）
    =========================================================
-   2026-11-16：先只放入口，页面留出工具位。
-   以后要加工具，只改下面的 WB_TOOLS 数组，不用动 HTML / CSS：
+   2026-11-16：任务平台搬到根路径后，这一页就是「一个入口点所有工具」。
+   要加工具，只改下面的 WB_TOOLS 数组，不用动 HTML / CSS：
      { icon, name, desc, url | onclick }
    加进去之后会自动排成卡片网格。
    ========================================================= */
 
-/* 工作台里的工具清单（现在为空 → 页面显示「工具还没放进来」）
-   例：
-     { icon: 'chart', name: '账本看板', desc: '投放花费 · 渠道成交 · ROI', url: wbSibling('ledger') }
-   icon 取值见 ui.js 的 ICON_PATHS；url 用 wbSibling() 拼，别写死 /cwsj */
-const WB_TOOLS = [];
-
 /* 同一台服务器上其它服务的地址：
-   当前挂载前缀的最后一段是服务名（IP 下 /cwsj，域名下 /cwsj/cwsj），换成目标服务即可。
-   IP 下 /cwsj/ → /ledger/；域名下 /cwsj/cwsj/ → /cwsj/ledger/ */
+   Api.base 就是任务平台自己挂载的前缀（IP 下 ''、域名下 '/cwsj'），
+   兄弟服务就在它下面一级，直接拼即可。
+     IP    ：''      + /tool/ledger/ → /tool/ledger/
+     域名  ：'/cwsj' + /tool/ledger/ → /cwsj/tool/ledger/
+   🔴 2026-11-16 之前这里会「去掉最后一段」，那是任务平台还挂在 /cwsj/cwsj 时的算法；
+      搬到根路径后必须直接用 Api.base，否则域名下会算成 /tool/... 跑到对方主站去。 */
 function wbSibling(name) {
-  const base = (window.Api && Api.base) || '';
-  const prefix = base.replace(/\/[^/]*$/, '');     /* 去掉服务名那一段 */
-  return prefix + '/' + name + '/';
+  const base = ((window.Api && Api.base) || '').replace(/\/$/, '');
+  return base + '/' + name + '/';
 }
+
+/* 工作台里的工具清单
+   icon 取值见 ui.js 的 ICON_PATHS
+   ⚠️ 套餐中枢（taocan）、码表核对（meter）现在还在老路径；等第二批搬进 /tool/ 时，
+      把这两行的 wbSibling('taocan') / wbSibling('meter') 改成 wbSibling('tool/taocan') 等即可。 */
+const WB_TOOLS = [
+  {
+    icon: 'chart',
+    name: '账本看板',
+    desc: '投放花费 · 渠道成交 · ROI',
+    url: wbSibling('tool/ledger')
+  },
+  {
+    icon: 'board',
+    name: '套餐中枢',
+    desc: '套餐库 · 绑券 · 抖音上架',
+    url: wbSibling('taocan')
+  },
+  {
+    icon: 'checklist',
+    name: '码表核对',
+    desc: '机台码表填报与对账',
+    url: wbSibling('meter')
+  },
+  {
+    icon: 'calendar',
+    name: '日报监控台',
+    desc: '看日报状态 · 一键触发',
+    url: wbSibling('daily')
+  },
+  {
+    icon: 'link',
+    name: '宝点扫码登录',
+    desc: '扫码换宝点登录态',
+    url: wbSibling('bd-login')
+  }
+];
 
 function pageWorkbench() {
   const wrap = h('div', { class: 'wb-page' });
 
-  /* 还没有工具 → 占位说明，不假装有内容 */
+  /* 一个工具都没有 → 占位说明，不假装有内容 */
   if (!WB_TOOLS.length) {
     wrap.appendChild(h('div', { class: 'wb-empty' }, [
       h('div', { class: 'wb-empty-ico', html: iconSvg('grid', 24) }),
