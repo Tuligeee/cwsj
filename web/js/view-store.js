@@ -293,17 +293,22 @@ function verdictBar(t, storeId, rec) {
     ].filter(Boolean));
   }
   const daily = t.cycle === 'daily';
-  return h('div', { class: 'rec-verdict', style: { marginTop: '8px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } }, [
+  /* 2026-11-16：判定动作重新设计——两条不同的处置路径，用颜色和图标区分，
+     并补一行后果说明，避免两个灰按钮分不清哪个是「不合格」哪个是「警告」 */
+  const ICON_FAIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
+  const ICON_WARN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  return h('div', { class: 'verdict-actions' }, [
+    h('span', { class: 'va-label', text: '判定' }),
     h('button', {
-      class: 'btn btn-sm',
+      class: 'btn-verdict btn-verdict-fail', type: 'button', title: '要求门店整改并重新提交',
       onclick: (e) => { e.stopPropagation(); openVerdictModal(t, storeId, rec, 'fail'); }
-    }, '判定不合格'),
+    }, [h('span', { class: 'bv-ico', html: ICON_FAIL }), h('span', { text: '判定不合格' })]),
     h('button', {
-      class: 'btn btn-sm',
+      class: 'btn-verdict btn-verdict-warn', type: 'button', title: '认定「没做却点了提交」，计入考核',
       onclick: (e) => { e.stopPropagation(); openVerdictModal(t, storeId, rec, 'warn'); }
-    }, '标记警告'),
-    daily ? h('span', { class: 'fhint', style: { margin: '0' }, text: '每日任务不支持重做' }) : null
-  ].filter(Boolean));
+    }, [h('span', { class: 'bv-ico', html: ICON_WARN }), h('span', { text: '标记警告' })]),
+    h('span', { class: 'va-hint', text: daily ? '不合格会通知门店 · 每日任务不支持重做' : '不合格会通知门店 24 小时内重做 · 警告计入考核' })
+  ]);
 }
 
 /** 判定成功后重新取数并重绘当前页（判定落在服务端，本地 state 已过期） */
@@ -403,7 +408,10 @@ function openStoreTaskDetail(t, item, opt) {
       const item2 = h('div', { class: 'rec-item' + (r.rec ? '' : ' rec-miss') });
       const imgs = (r.rec && r.rec.images) ? r.rec.images : [];
       const thumbs = h('div', { class: 'rec-thumbs' });
-      imgs.slice(0, 3).forEach(src => thumbs.appendChild(h('img', { class: 'rec-thumb', src: imgSrc(src), onclick: (ev) => { ev.stopPropagation(); lightbox(src); } })));
+      imgs.slice(0, 3).forEach((src, i) => thumbs.appendChild(h('img', {
+        class: 'rec-thumb', src: imgSrc(src), alt: '',
+        onclick: (ev) => { ev.stopPropagation(); openViewer(imgs, i, ev.currentTarget); }
+      })));
       if (imgs.length > 3) thumbs.appendChild(h('span', { class: 'rec-more-n', text: '+' + (imgs.length - 3) }));
 
       const row = h('div', { class: 'rec-row' }, [

@@ -913,7 +913,11 @@ function openViewer(items, start, originEl) {
 }
 
 /* 旧接口保留：单张调用 */
-function lightbox(src) { openViewer([src], 0); }
+/* 2026-11-16：支持整组——传 list + 起点序号，就能在查看器里左右切换 */
+function lightbox(src, list, idx) {
+  const arr = (list && list.length) ? list.slice() : [src];
+  openViewer(arr, (idx | 0) || 0);
+}
 
 function thumbsNode(images) {
   if (!images || !images.length) return null;
