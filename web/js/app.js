@@ -40,8 +40,8 @@ const ROUTES = {
     },
     { g: '数据', items: [{ id: 'mystats', label: '我的数据', iconKey: 'chart' }] },
     { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', iconKey: 'more' }] : [] },
-    /* 工作台（2026-11-16）：pin 让它贴着导航最下面；先只放入口，工具以后再往里加（见 view-workbench.js） */
-    { g: '', pin: true, items: [{ id: 'workbench', label: '工作台', iconKey: 'grid' }] }
+    /* 工作台（2026-11-16）：单独一组「工具」，先只放入口，工具以后再往里加（见 view-workbench.js） */
+    { g: '工具', items: [{ id: 'workbench', label: '工作台', iconKey: 'grid' }] }
   ],
   hq: [
     /* 任务在前、门店提需在后（2026-11-06 调整顺序） */
@@ -74,8 +74,8 @@ const ROUTES = {
       ]
     },
     { g: '更多', items: window.innerWidth <= 900 ? [{ id: 'more', label: '更多', iconKey: 'more' }] : [] },
-    /* 工作台（2026-11-16）：pin 让它贴着导航最下面；先只放入口，工具以后再往里加（见 view-workbench.js） */
-    { g: '', pin: true, items: [{ id: 'workbench', label: '工作台', iconKey: 'grid' }] }
+    /* 工作台（2026-11-16）：单独一组「工具」，先只放入口，工具以后再往里加（见 view-workbench.js） */
+    { g: '工具', items: [{ id: 'workbench', label: '工作台', iconKey: 'grid' }] }
   ]
 };
 
@@ -243,12 +243,11 @@ function go(id, silent) {
   routes.forEach(grp => {
     const items = grp.items.filter(it => !it.admin || (me && me.admin));
     if (!items.length) return;
-    /* g 为空 = 不显示分组标题（工作台贴着最下面，不要「其他」这种小标题） */
-    if (grp.g) nav.appendChild(h('div', { class: 'nav-group', text: grp.g }));
+    nav.appendChild(h('div', { class: 'nav-group', text: grp.g }));
     items.forEach(it => {
       const n = navBadge(it.id);
       const el = h('div', {
-        class: 'nav-item' + (it.id === id ? ' active' : '') + (grp.pin ? ' nav-pin' : ''),
+        class: 'nav-item' + (it.id === id ? ' active' : ''),
         dataset: { nav: it.id },        /* 手机端按 id 隐藏部分入口（CSS 里控制，桌面端不受影响） */
         onclick: () => {
           if (it.children && !M2()) {
