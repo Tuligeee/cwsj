@@ -624,12 +624,14 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   /* ---- 手机端导航精简（桌面端不受影响）----
      门店：我的任务 / 通讯录（2 项）
      总部：门店提需 / 我发布的任务 / 任务督办看板（3 项）
-     其余入口只在电脑上出现：提需、我的数据、通讯录(总部)、考核统计、管理员后台 */
+     其余入口只在电脑上出现：提需、我的数据、通讯录(总部)、考核统计、管理员后台、工作台
+     （2026-11-16：工作台在手机上收进「更多」，不占底部导航） */
   .nav-item[data-nav="demands"],
   .nav-item[data-nav="mystats"],
   .nav-item[data-nav="hq-contacts"],
   .nav-item[data-nav="hq-stats"],
-  .nav-item[data-nav="admin"]{display:none;}
+  .nav-item[data-nav="admin"],
+  .nav-item[data-nav="workbench"]{display:none;}
   /* 项少的时候居中排列，别把 2 个 tab 拉成各占一半 */
   .side-nav{justify-content:center;}
   .nav-item{flex:0 1 110px; min-width:86px;}

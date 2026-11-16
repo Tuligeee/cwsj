@@ -1552,11 +1552,14 @@ const PAGE_STORE = {
 /* ---------------- 更多（手机端未放进底部导航的页面） ---------------- */
 function pageMore() {
   const wrap = h('div');
+  /* 工作台（2026-11-16）：电脑上在左侧导航最下面，手机上收进这里 */
   const items = isStore()
-    ? [['mystats', '我的数据', '任务完成率、按时率、考核得分']]
+    ? [['mystats', '我的数据', '任务完成率、按时率、考核得分'],
+       ['workbench', '工作台', '常用工具集中在这里']]
     : [['hq-contacts', '通讯录', '各部门对接人与电话'],
        ['hq-stats', '数据统计与考核', '全区完成率、门店排名与考核规则'],
-       ['admin', '管理员后台', '门店与分区 · 账号（手机端只读）']];
+       ['admin', '管理员后台', '门店与分区 · 账号（手机端只读）'],
+       ['workbench', '工作台', '常用工具集中在这里']];
   const list = h('div', { class: 'more-list' });
   items.forEach(([id, name, desc]) => {
     list.appendChild(h('div', { class: 'more-row', onclick: () => go(id) }, [
@@ -1569,7 +1572,8 @@ function pageMore() {
   });
   wrap.appendChild(list);
   wrap.appendChild(h('p', { class: 'fhint', style: { margin: '12px 2px 0' } },
-    isStore() ? '其余页面在底部导航里' : '通讯录、数据统计、管理员后台放在这里；常用三页在底部导航'));
+    isStore() ? '工作台、我的数据放在这里；任务与通讯录在底部导航'
+              : '通讯录、数据统计与考核、管理员后台、工作台放在这里；常用三页在底部导航'));
   return wrap;
 }
 
