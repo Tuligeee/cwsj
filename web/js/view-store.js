@@ -907,13 +907,29 @@ function openContactEditor(c, onDone) {
     phone: inputNode({ value: c.phone }), wechat: inputNode({ value: c.wechat }),
     email: inputNode({ value: c.email })
   };
-  const deptSel = selectNode(state.departments.map(d => ({ v: d, t: d })), c.dept);
+  /* 2026-11-24：部门加「门店」一项，选中后联动门店下拉，写 refId。
+     原来只能选总部部门，门店联系人（refId=STxx）根本没法在这张表单里维护。 */
+  const isStoreContact = c.dept === '门店' || !!c.refId;
+  const deptSel = selectNode(
+    [{ v: '门店', t: '门店' }].concat((state.departments || []).filter(d => d !== '门店').map(d => ({ v: d, t: d }))),
+    isStoreContact ? '门店' : (c.dept || '人事部')
+  );
+  const storeSel = selectNode(
+    (state.stores || []).map(s => ({ v: s.id, t: s.name + ' · ' + s.id })),
+    c.refId || ''
+  );
+  const storeGroup = fgroup('门店', storeSel, '门店联系人按这一项对应到店，门店端登录后能看到本店事务对接人');
+  storeGroup.style.display = isStoreContact ? '' : 'none';
+  deptSel.addEventListener('change', () => {
+    storeGroup.style.display = deptSel.value === '门店' ? '' : 'none';
+  });
   const duty = textareaNode({ rows: '3', placeholder: '例如：门店招聘与排班、考勤与绩效核算、通讯录维护', value: c.duty || '' });
   const inst = openModal({
     title: isNew ? '新增联系人' : '编辑联系人', narrow: false,
     body: h('div', { class: 'fgrid c2' }, [
       fgroup('姓名', ref.name, null, true),
       fgroup('部门', deptSel, null, true),
+      storeGroup,
       fgroup('职务', ref.title),
       fgroup('联系电话', ref.phone),
       fgroup('微信', ref.wechat),
@@ -938,8 +954,11 @@ function openContactEditor(c, onDone) {
         class: 'btn btn-primary', onclick: () => {
           if (!ref.name.value.trim()) { toast('请填写姓名', 'err'); return; }
           if (!duty.value.trim()) { toast('请填写负责工作', 'err'); return; }
+          const toStore = deptSel.value === '门店';
+          if (toStore && !storeSel.value) { toast('请选择门店', 'err'); return; }
           upsertContact({
-            id: c.id, name: ref.name.value.trim(), dept: deptSel.value, title: ref.title.value.trim(),
+            id: c.id, name: ref.name.value.trim(), dept: deptSel.value,
+            refId: toStore ? storeSel.value : '', title: ref.title.value.trim(),
             duty: duty.value.trim(), phone: ref.phone.value.trim(), wechat: ref.wechat.value.trim(), email: ref.email.value.trim()
           });
           inst.close(); toast(isNew ? '已新增联系人' : '已保存'); onDone && onDone();

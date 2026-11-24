@@ -613,10 +613,15 @@ function contactFromAccount(type, row) {
     duty: '待补充', phone: row.phone || '', account: row.account, source: 'account',
   };
 }
+function removeAutoContact(state, refId) {
+  if (!Array.isArray(state.contacts)) return;
+  state.contacts = state.contacts.filter((c) => !(c.refId === refId && c.source === 'account'));
+}
 function syncContact(state, type, row) {
   if (!Array.isArray(state.contacts)) state.contacts = [];
   const fresh = contactFromAccount(type, row);
-  if (!fresh) return;
+  /* 门店没填店长（或账号被清空）→ 撤掉自动联系人，别留一条空壳 */
+  if (!fresh) { removeAutoContact(state, row && row.id); return; }
   const exist = state.contacts.find((c) => c.refId === row.id);
   if (exist) {
     Object.assign(exist, { name: fresh.name, dept: fresh.dept, title: fresh.title, phone: fresh.phone, account: fresh.account });
@@ -644,6 +649,8 @@ function saveAccount(actor, kind, mode, id, patch) {
       if (others === 0) return { ok: false, code: 400, msg: '这是最后一个管理员账号，不能删除。请先把管理员权限交给别人。' };
     }
     box.splice(idx, 1);
+    /* 2026-11-24：账号删了，通讯录里自动生成的那条也要跟着删（原来会留孤儿） */
+    removeAutoContact(state, id);
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
   } else {
     /* ---- 新增 / 编辑 ---- */
