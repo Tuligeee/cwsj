@@ -300,9 +300,12 @@ function taskProgress(task, now, asOf) {
   /* asOf：还原"截至某一刻"的状态。看历史某天时，那天之后才提交的记录应视为未交（2026-11-11） */
   const cut = asOf ? new Date(asOf) : nowD;
   const res = { expected: 0, done: 0, lateDone: 0, overdue: 0, dueSoon: 0, rejected: 0, rate: 0, cells: [] };
+  const _joinOf = (id) => storeJoinYmd(id);
   task.storeIds.forEach(sid => {
     if (task.status === 'active' && !taskActiveOn(task, nowD)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
     const due = occDue(task, nowD);
+    /* 门店还没加入（本期到期日早于加入日）→ 不参与本期统计 */
+    if (_joinOf(sid) && ymd(due) < _joinOf(sid)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
     const key = occKey(task, nowD);
     const rec0 = getRecord(task.id, sid, key);
     const rec = (rec0 && new Date(rec0.doneAt).getTime() > cut.getTime()) ? null : rec0;
@@ -320,6 +323,13 @@ function taskProgress(task, now, asOf) {
 }
 
 /* ---------------- 门店完成统计 ---------------- */
+/* 门店「加入日期」：新店上架前那些期次不该算进应完成（2026-11-24）
+   苏州四店 11-23 才正式启用，但它在 19 个任务的门店列表里，
+   按原口径会背 246 个历史期次，完成率直接 0%。 */
+function storeJoinYmd(storeId) {
+  const st = (state.stores || []).find(x => x.id === storeId);
+  return (st && st.joinedAt) ? String(st.joinedAt).slice(0, 10) : '';
+}
 function storeCompletion(storeId, days, now) {
   const nowD = now ? new Date(now) : new Date();
   const from = addDays(startOfDay(nowD), -(days - 1));
@@ -330,10 +340,13 @@ function storeCompletion(storeId, days, now) {
   const seen = new Set();
   const dayStats = {};
 
+  const joinYmd = storeJoinYmd(storeId);
   for (let i = 0; i < days; i++) {
     const day = addDays(from, i);
     const dkey = ymd(day);
     if (!dayStats[dkey]) dayStats[dkey] = acc();
+    /* 加入之前的日期整段跳过：既不算应完成，也不算逾期 */
+    if (joinYmd && dkey < joinYmd) continue;
     state.tasks.forEach(t => {
       if (!t.storeIds.includes(storeId)) return;
       if (!taskActiveOn(t, day)) return;

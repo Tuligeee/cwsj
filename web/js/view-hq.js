@@ -2497,7 +2497,9 @@ function pageAdmin() {
       phone: inputNode({ value: s.phone || '', placeholder: '联系电话' }),
       /* 登录账号绑 account（拼音号），不是内部编号 code；密码留空 = 不修改 */
       account: inputNode({ value: s.account || '', placeholder: '英文/数字，如 nanchang1' }),
-      pwd: inputNode({ value: '', placeholder: isNew ? '留空则用初始密码' : '留空则不修改' })
+      pwd: inputNode({ value: '', placeholder: isNew ? '留空则用初始密码' : '留空则不修改' }),
+      /* 加入日期：留空 = 从任务起始就算（老店保持原样）；填了 = 之前的期次不算应完成 */
+      joinedAt: h('input', { class: 'inp', type: 'date', value: (s.joinedAt || '').slice(0, 10) })
     };
     const regionSel = selectNode([{ v: '', t: '未分区' }].concat(state.regions.map(x => ({ v: x.id, t: x.name }))), s.regionId || '');
     const inst = openModal({
@@ -2510,7 +2512,8 @@ function pageAdmin() {
         fgroup('登录账号', ref.account, null, true),
         fgroup('登录密码', ref.pwd, null, true),
         fgroup('联系电话', ref.phone),
-        fgroup('所属分区', regionSel)
+        fgroup('所属分区', regionSel),
+        fgroup('加入日期', ref.joinedAt, '新店填上线日期，之前的历史期次不算「应完成」；老店留空')
       ]),
       footer: [
         h('button', { class: 'btn', onclick: () => inst.close() }, '取消'),
@@ -2526,7 +2529,8 @@ function pageAdmin() {
               name: ref.name.value.trim(), city: ref.city.value.trim(), addr: ref.addr.value.trim(),
               mgr: ref.mgr.value.trim(), phone: ref.phone.value.trim(),
               account, pwd: ref.pwd.value.trim(),
-              regionId: regionSel.value || null
+              regionId: regionSel.value || null,
+              joinedAt: ref.joinedAt.value || ''
             };
             try {
               if (isNew) { await addStore(patch); toast('门店已创建，账号 ' + account, 'ok'); }
