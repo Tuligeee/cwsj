@@ -439,6 +439,69 @@ function jumpTo(o) {
   }
 }
 
+/* ---------------- 钉钉登录回跳 ---------------- */
+/* 回调只带一次性 ticket（5 分钟），token 不进 URL。
+   密码登录和钉钉登录共用同一套收尾，避免两处各写一遍再漂移。 */
+let dingLoginError = '';
+
+function cleanDingQuery() {
+  try {
+    const u = new URL(location.href);
+    ['ding', 'ding_err', 'pick'].forEach(k => u.searchParams.delete(k));
+    history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+  } catch (_) {}
+}
+
+async function afterLogin(user, mustChangePwd) {
+  currentRoute = null;
+  if (window.__SERVER_MODE) {
+    const b = await Api.bootstrap();
+    window.__BOOT_STATE = b.state;
+    window.__BOOT_ME = b.me;
+    loadState();
+  }
+  renderApp();
+  setTimeout(applyDeepLink, 400);
+  toast('欢迎回来，' + ((user && user.name) || ''), 'ok');
+  if (mustChangePwd) setTimeout(() => toast('当前仍是初始密码，建议尽快修改', 'err'), 1500);
+}
+
+function openDingPick(ticket, cands) {
+  const inst = openModal({
+    title: '选择身份',
+    sub: '这个钉钉号绑定了多个账号',
+    narrow: true,
+    body: h('div', {}, cands.map(c => h('button', {
+      class: 'btn', style: { width: '100%', justifyContent: 'space-between', marginBottom: '8px' },
+      onclick: async () => {
+        try {
+          const r = await Api.dingPick(ticket, c.id);
+          if (!r || !r.ok) { toast((r && r.msg) || '进入失败', 'err'); return; }
+          inst.close();
+          await afterLogin(r.user);
+        } catch (e) { toast(e.message, 'err'); }
+      }
+    }, [h('span', {}, c.name), h('span', { class: 'fhint', style: { margin: 0 } }, c.account)]))),
+  });
+}
+
+/* 返回 true 表示已经登录并进主界面了，boot 不用再走一遍 */
+async function handleDingReturn() {
+  const qs = new URLSearchParams(location.search);
+  const errMsg = qs.get('ding_err');
+  if (errMsg) { dingLoginError = errMsg; cleanDingQuery(); return false; }
+  const ticket = qs.get('ding');
+  if (!ticket) return false;
+  cleanDingQuery();
+  try {
+    const r = await Api.dingToken(ticket);
+    if (r && r.ok) { await afterLogin(r.user); return true; }
+    if (r && r.code === 'NEED_PICK') { openDingPick(ticket, r.candidates || []); return false; }
+    dingLoginError = (r && r.msg) || '钉钉登录失败';
+  } catch (e) { dingLoginError = e.message; }
+  return false;
+}
+
 /* ---------------- 登录页 ---------------- */
 let loginRole = 'store';
 function renderLogin() {
@@ -450,6 +513,7 @@ function renderLogin() {
   const accInput = inputNode({ placeholder: '请输入账号', autocomplete: 'off' });
   const pwd = h('input', { class: 'input', type: 'password', placeholder: '请输入密码', value: '' });
   const err = h('div', { class: 'login-err' });
+  if (dingLoginError) { err.textContent = dingLoginError; dingLoginError = ''; }
 
   function fillAcc(account) {
     accInput.value = account;
@@ -471,23 +535,11 @@ function renderLogin() {
     const r = await login(accInput.value, pwd.value);
     if (!r.ok) { err.textContent = r.msg; return; }
     err.textContent = '';
-    currentRoute = null;
-    /* 服务端模式：登录成功后拉一次全量数据 */
-    if (window.__SERVER_MODE) {
-      try {
-        const b = await Api.bootstrap();
-        window.__BOOT_STATE = b.state;
-        window.__BOOT_ME = b.me;
-        loadState();
-      } catch (e) {
-        err.textContent = '加载数据失败：' + e.message;
-        return;
-      }
+    try {
+      await afterLogin(r.user, r.mustChangePwd);
+    } catch (e) {
+      err.textContent = '加载数据失败：' + e.message;
     }
-    renderApp();
-    setTimeout(applyDeepLink, 400);
-    toast('欢迎回来，' + r.user.name, 'ok');
-    if (r.mustChangePwd) setTimeout(() => toast('当前仍是初始密码，建议尽快修改', 'err'), 1500);
   }
   pwd.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   accInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwd.focus(); });
@@ -512,6 +564,10 @@ function renderLogin() {
       h('div', { class: 'field' }, [h('label', {}, '密码'), pwd]),
       err,
       h('button', { class: 'btn btn-primary', style: { width: '100%', justifyContent: 'center', padding: '10px' }, onclick: doLogin }, '登录'),
+      h('button', {
+        class: 'btn', style: { width: '100%', justifyContent: 'center', padding: '10px', marginTop: '8px' },
+        onclick: () => Api.dingStart()
+      }, '钉钉登录'),
       h('div', { class: 'login-hint' }, [
         h('div', { class: 'ht' }, '账号或密码忘记了，请联系管理公司管理员重置'),
         accBox
@@ -611,6 +667,9 @@ async function boot() {
 
   /* 本构建始终走服务端模式（本地单机演示请用桌面原版） */
   window.__SERVER_MODE = true;
+
+  /* 钉钉登录回跳：已经登录并渲染完，后面的初始化不用再走一遍 */
+  if (await handleDingReturn()) return;
 
   /* 有 token 就先换数据；token 失效会自动落到登录页 */
   if (Api.getToken()) {

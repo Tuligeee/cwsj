@@ -83,6 +83,12 @@ function isDefaultPwd(plain) {
   return plain === (require('./db').DEFAULT_STORE_PWD) || plain === '123456';
 }
 
+/* ---------------- 钉钉登录（2026-11-24） ----------------
+   只换"拿 token 的方式"，登录后的会话与权限判定完全复用 /api/login 那套。
+   回调只认域名（DING_LOGIN_BASE），IP 直连不可用。
+   ticket 5 分钟、token 不进 URL。路由集中写在 src/ding_login.js，便于单测。 */
+require('./ding_login').mount(app, { sign, log });
+
 /* ---------------- 拉取全量数据 ---------------- */
 /* 按角色裁剪提需（2026-10-29）：门店只看本店；普通总部只看到派给自己的；
    管委会/管理员看全部。注意：PUT 时必须合并回去，见下方 scopeMerge。 */
