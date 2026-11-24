@@ -702,6 +702,9 @@ function saveAccount(actor, kind, mode, id, patch) {
   const nextVersion = st.version + 1;
   db.prepare("UPDATE state_doc SET version = ?, data = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE id = 1")
     .run(nextVersion, JSON.stringify(state), actor.id);
+  /* 2026-11-24：这里原来漏了同步拆表 —— 页面读的是拆表，
+     导致「改店长/改分区/改账号」后通讯录、门店列表看不到变化（踩了手册第 1 条坑） */
+  try { split.syncToTables(state); } catch (e) { console.error('split.sync.fail', e.message); }
 
   log(actor.id, `admin.${type}.${mode}`, `${patch.account || id}`);
   return { ok: true, id, version: nextVersion, state };
