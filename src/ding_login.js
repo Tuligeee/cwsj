@@ -9,6 +9,7 @@
    · DING_MOCK=1 时跳过钉钉网络，用 code 直接当 userid，供本地联调
    ========================================================= */
 const crypto = require('crypto');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { db } = require('./db');
 const { SECRET } = require('./auth');
@@ -21,6 +22,35 @@ const OAPI = 'https://oapi.dingtalk.com';
    必须显式配置 —— nginx 会剥掉挂载前缀，服务端自己推不出来。 */
 const BASE = (process.env.DING_LOGIN_BASE || '').replace(/\/+$/, '');
 const MOCK = process.env.DING_MOCK === '1';
+
+/* ---------- 登录专用凭据 ----------
+   扫码登录要的是「开了网页应用能力」的那个应用的 AppKey/AppSecret，
+   而机器人用的是另一个（现在恰好是同一个）。
+   允许用 DING_LOGIN_APP_KEY / DING_LOGIN_APP_SECRET 单独指定，
+   没配就回落到机器人那套。不经过 ding.loadEnv()，因为它强制要求 ROBOT_CODE。 */
+const ENV_FILE = process.env.DING_ENV_FILE || '/opt/cwsj/.ding.env';
+
+function readEnvFile() {
+  const out = {};
+  try {
+    fs.readFileSync(ENV_FILE, 'utf8').split('\n').forEach(line => {
+      const s = line.trim();
+      if (!s || s.startsWith('#')) return;
+      const i = s.indexOf('=');
+      if (i < 0) return;
+      out[s.slice(0, i).trim()] = s.slice(i + 1).trim().replace(/^["']|["']$/g, '');
+    });
+  } catch (e) { /* 读不到就交给调用方报错 */ }
+  return out;
+}
+
+function loadLoginEnv() {
+  const env = readEnvFile();
+  const key = env.DING_LOGIN_APP_KEY || env.DINGTALK_APP_KEY || process.env.DING_LOGIN_APP_KEY;
+  const secret = env.DING_LOGIN_APP_SECRET || env.DINGTALK_APP_SECRET || process.env.DING_LOGIN_APP_SECRET;
+  if (!key || !secret) throw new Error('没有登录用的钉钉应用凭据（DING_LOGIN_APP_KEY / DING_LOGIN_APP_SECRET 或 DINGTALK_APP_KEY / SECRET）');
+  return { key, secret };
+}
 
 /* ding_map / ding_people 两张表历史上是手工在服务器上建的，仓库里没有建表语句。
    这里补一份 IF NOT EXISTS：新库（比如重建的测试库）也能跑，老库不受影响。 */
@@ -65,13 +95,13 @@ function takeState(s) {
 async function codeToDingUserid(code) {
   if (MOCK) return String(code);            // 本地联调：code 就是 userid
 
-  const env = ding.loadEnv();
+  const env = loadLoginEnv();
   const r = await fetch(API2 + '/v1.0/oauth2/userAccessToken', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      clientId: env.DINGTALK_APP_KEY,
-      clientSecret: env.DINGTALK_APP_SECRET,
+      clientId: env.key,
+      clientSecret: env.secret,
       code,
       grantType: 'authorization_code',
     }),
@@ -115,19 +145,19 @@ function publicUser(row) {
 /* ---------- 路由 ---------- */
 function startUrl() {
   if (!BASE) throw new Error('没有配置 DING_LOGIN_BASE（例：https://mancado.cn/cwsj/cwsj-stg）');
-  let env;
+  let key;
   try {
-    env = ding.loadEnv();
+    key = loadLoginEnv().key;
   } catch (e) {
     if (!MOCK) throw e;                       // 真跑必须凭据齐全；本地 mock 允许没有 .ding.env
-    env = { DINGTALK_APP_KEY: 'mock-app-key' };
+    key = 'mock-app-key';
   }
   const state = newState();
   const redirect = BASE + '/api/auth/ding/callback';
   const q = new URLSearchParams({
     redirect_uri: redirect,
     response_type: 'code',
-    client_id: env.DINGTALK_APP_KEY,
+    client_id: key,
     scope: 'openid',
     state,
     prompt: 'consent',
