@@ -439,6 +439,58 @@ function jumpTo(o) {
   }
 }
 
+/* 钉钉内免登：在工作台/消息里点开网页应用时自动拿身份，不用输密码。
+   依赖服务端 /api/auth/ding/jsapi 给的 dd.config 签名。 */
+function inDingTalk() { return /DingTalk/i.test(navigator.userAgent); }
+
+function loadJsapi() {
+  return new Promise((resolve, reject) => {
+    if (window.dd && window.dd.runtime) return resolve(window.dd);
+    const s = document.createElement('script');
+    s.src = 'https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js';
+    s.onload = () => resolve(window.dd);
+    s.onerror = () => reject(new Error('钉钉 JSAPI 加载失败'));
+    document.head.appendChild(s);
+  });
+}
+
+async function tryDingAutoLogin() {
+  if (!inDingTalk()) return false;
+  try {
+    const dd = await loadJsapi();
+    if (!dd || !dd.runtime) return false;
+    const cfg = await fetch(Api.base + '/api/auth/ding/jsapi?url=' + encodeURIComponent(location.href.split('#')[0]))
+      .then(r => r.json());
+    if (!cfg || !cfg.ok) throw new Error((cfg && cfg.msg) || '免登配置失败');
+    await new Promise((resolve, reject) => {
+      dd.config({
+        agentId: cfg.agentId, corpId: cfg.corpId, timeStamp: cfg.timeStamp,
+        nonceStr: cfg.nonceStr, signature: cfg.signature,
+        jsApiList: ['runtime.permission.requestAuthCode'],
+      });
+      dd.error(err => reject(new Error((err && err.errorMessage) || '钉钉鉴权失败')));
+      dd.ready(resolve);
+      setTimeout(resolve, 3000);
+    });
+    const code = await new Promise((resolve, reject) => {
+      dd.runtime.permission.requestAuthCode({
+        corpId: cfg.corpId,
+        onSuccess: (info) => resolve(info.code),
+        onFail: (err) => reject(new Error((err && err.errorMessage) || '拿免登码失败')),
+      });
+    });
+    const r = await fetch(Api.base + '/api/auth/ding/h5', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+    }).then(x => x.json());
+    if (r && r.ok) { Api.setToken(r.token); await afterLogin(r.user); return true; }
+    if (r && r.code === 'NEED_PICK') { openDingPick(r.ticket, r.candidates || []); return false; }
+    dingLoginError = (r && r.msg) || '钉钉免登失败';
+  } catch (e) {
+    dingLoginError = e.message;
+  }
+  return false;
+}
+
 /* ---------------- 钉钉登录回跳 ---------------- */
 /* 回调只带一次性 ticket（5 分钟），token 不进 URL。
    密码登录和钉钉登录共用同一套收尾，避免两处各写一遍再漂移。 */
@@ -681,6 +733,9 @@ async function boot() {
       if (e.code !== 'UNAUTHORIZED') toast('连不上服务器：' + e.message, 'err');
     }
   }
+
+  /* 没 token 且在钉钉里打开 → 先试免登，成功就直接进主界面 */
+  if (!Api.getToken() && await tryDingAutoLogin()) return;
 
   loadState();
   bindTopbar();

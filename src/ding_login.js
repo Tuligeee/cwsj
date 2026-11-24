@@ -211,11 +211,89 @@ function exchange(ticket) {
   return cands[0];
 }
 
+/* ---------- 钉钉内免登（H5 / JSAPI） ----------
+   2026-11-24：这个企业的控制台不提供「扫码登录」能力（所有参数组合都回 900103
+   Application does not exist），网页应用能力描述写的就是「免登」，所以主路径改成：
+   在钉钉里打开 → dd.runtime.permission.requestAuthCode → 服务端换 userId。
+   依赖：DING_CORP_ID（企业 CorpId）、DING_AGENT_ID（默认 4738071575）。 */
+const CORP_ID = process.env.DING_CORP_ID || '';
+const AGENT_ID = process.env.DING_AGENT_ID || '4738071575';
+
+let _jsapi = { ticket: '', exp: 0 };
+
+async function getJsapiTicket() {
+  if (_jsapi.ticket && Date.now() < _jsapi.exp - 60000) return _jsapi.ticket;
+  const tok = await ding.getToken();
+  const j = await fetch(OAPI + '/get_jsapi_ticket?access_token=' + encodeURIComponent(tok))
+    .then(x => x.json()).catch(() => ({}));
+  if (j.errcode !== 0 || !j.ticket) throw new Error('取 jsapi_ticket 失败：' + (j.errmsg || j.errcode));
+  _jsapi = { ticket: j.ticket, exp: Date.now() + (j.expires_in || 7200) * 1000 };
+  return _jsapi.ticket;
+}
+
+/* dd.config 要求的签名：sha1(jsapi_ticket=..&noncestr=..&timestamp=..&url=..) */
+async function jsapiConfig(url) {
+  if (!CORP_ID) throw new Error('没有配置 DING_CORP_ID（企业 CorpId），免登录用不了');
+  const ticket = await getJsapiTicket();
+  const nonceStr = crypto.randomBytes(8).toString('hex');
+  const timeStamp = String(Math.floor(Date.now() / 1000));
+  const plain = 'jsapi_ticket=' + ticket + '&noncestr=' + nonceStr + '&timestamp=' + timeStamp + '&url=' + url;
+  const signature = crypto.createHash('sha1').update(plain).digest('hex');
+  return { corpId: CORP_ID, agentId: AGENT_ID, timeStamp, nonceStr, signature };
+}
+
+/* 免登码 → 企业 userId */
+async function h5CodeToUserid(code) {
+  if (MOCK) return String(code);
+  const tok = await ding.getToken();
+  const j = await fetch(OAPI + '/topapi/user/getuserinfo?access_token=' + encodeURIComponent(tok), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  }).then(x => x.json()).catch(() => ({}));
+  if (j.errcode !== 0 || !j.result || !j.result.userid) {
+    throw new Error('免登码换 userId 失败：' + (j.errmsg || j.errcode));
+  }
+  return j.result.userid;
+}
+
 /* ---------- 路由挂载（server.js 和单测共用同一份） ---------- */
 function mount(app, deps) {
   const sign = deps.sign;
   const log = deps.log || (() => {});
   ensureSchema();
+
+  app.get('/api/auth/ding/jsapi', async (req, res) => {
+    try {
+      const url = String(req.query.url || '');
+      if (!url) return res.status(400).json({ ok: false, msg: '缺少页面地址' });
+      res.json(Object.assign({ ok: true }, await jsapiConfig(url)));
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  app.post('/api/auth/ding/h5', async (req, res) => {
+    const code = String((req.body || {}).code || '');
+    if (!code) return res.status(400).json({ ok: false, msg: '缺少免登码' });
+    try {
+      const dingUserid = await h5CodeToUserid(code);
+      const cands = candidatesOf(dingUserid);
+      if (!cands.length) {
+        return res.json({ ok: false, msg: '这个钉钉号还没绑定平台账号，请先用账号密码登录后在「钉钉提醒」里绑定' });
+      }
+      if (cands.length > 1) {
+        return res.json({ ok: false, code: 'NEED_PICK', msg: '这个钉钉号绑了多个账号，请选择身份',
+          candidates: cands.map(publicUser), ticket: issueTicket(dingUserid, cands) });
+      }
+      const row = cands[0];
+      const token = sign({ id: row.id, type: row.type });
+      log(row.id, 'login.ding.h5', row.name);
+      res.json({ ok: true, token, user: publicUser(row) });
+    } catch (e) {
+      res.status(400).json({ ok: false, msg: e.message });
+    }
+  });
 
   app.get('/api/auth/ding/start', (req, res) => {
     try {
