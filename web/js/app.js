@@ -460,7 +460,7 @@ async function tryDingAutoLogin() {
     const dd = await loadJsapi();
     if (!dd || !dd.runtime) return false;
     /* 钉钉从工作台打开网页应用时，URL 上可能带 corpId —— 有就直接用，省得配环境变量 */
-    const qsCorp = new URLSearchParams(location.search).get('corpId') || '';
+    const qsCorp = new URLSearchParams(location.search).get('corpid') || new URLSearchParams(location.search).get('corpId') || '';
     const cfg = await fetch(Api.base + '/api/auth/ding/jsapi?url='
       + encodeURIComponent(location.href.split('#')[0])
       + (qsCorp ? '&corpId=' + encodeURIComponent(qsCorp) : ''))
