@@ -459,7 +459,11 @@ async function tryDingAutoLogin() {
   try {
     const dd = await loadJsapi();
     if (!dd || !dd.runtime) return false;
-    const cfg = await fetch(Api.base + '/api/auth/ding/jsapi?url=' + encodeURIComponent(location.href.split('#')[0]))
+    /* 钉钉从工作台打开网页应用时，URL 上可能带 corpId —— 有就直接用，省得配环境变量 */
+    const qsCorp = new URLSearchParams(location.search).get('corpId') || '';
+    const cfg = await fetch(Api.base + '/api/auth/ding/jsapi?url='
+      + encodeURIComponent(location.href.split('#')[0])
+      + (qsCorp ? '&corpId=' + encodeURIComponent(qsCorp) : ''))
       .then(r => r.json());
     if (!cfg || !cfg.ok) throw new Error((cfg && cfg.msg) || '免登配置失败');
     await new Promise((resolve, reject) => {

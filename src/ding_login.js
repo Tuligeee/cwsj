@@ -231,15 +231,19 @@ async function getJsapiTicket() {
   return _jsapi.ticket;
 }
 
-/* dd.config 要求的签名：sha1(jsapi_ticket=..&noncestr=..&timestamp=..&url=..) */
-async function jsapiConfig(url) {
-  if (!CORP_ID) throw new Error('没有配置 DING_CORP_ID（企业 CorpId），免登录用不了');
+/* dd.config 签名。corpId 优先用调用方给的（钉钉打开网页应用时会在 URL 上带），
+   没有再回落到环境变量 —— 这样没拿到企业 CorpId 也能先跑起来。 */
+async function jsapiConfig(url, corpIdFromClient) {
+  const corp = /^ding[0-9A-Za-z]{10,}$/.test(String(corpIdFromClient || ''))
+    ? String(corpIdFromClient)
+    : CORP_ID;
+  if (!corp) throw new Error('没有配置 DING_CORP_ID（企业 CorpId），免登录用不了');
   const ticket = await getJsapiTicket();
   const nonceStr = crypto.randomBytes(8).toString('hex');
   const timeStamp = String(Math.floor(Date.now() / 1000));
   const plain = 'jsapi_ticket=' + ticket + '&noncestr=' + nonceStr + '&timestamp=' + timeStamp + '&url=' + url;
   const signature = crypto.createHash('sha1').update(plain).digest('hex');
-  return { corpId: CORP_ID, agentId: AGENT_ID, timeStamp, nonceStr, signature };
+  return { corpId: corp, agentId: AGENT_ID, timeStamp, nonceStr, signature };
 }
 
 /* 免登码 → 企业 userId */
@@ -267,7 +271,7 @@ function mount(app, deps) {
     try {
       const url = String(req.query.url || '');
       if (!url) return res.status(400).json({ ok: false, msg: '缺少页面地址' });
-      res.json(Object.assign({ ok: true }, await jsapiConfig(url)));
+      res.json(Object.assign({ ok: true }, await jsapiConfig(url, req.query.corpId)));
     } catch (e) {
       res.status(500).json({ ok: false, msg: e.message });
     }
