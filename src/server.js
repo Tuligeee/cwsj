@@ -755,10 +755,11 @@ const _atTime = (dateStr, timeStr) => {
   const [hh, mm] = String(timeStr || '00:00').split(':').map(Number);
   return new Date(y, m - 1, dd, hh || 0, mm || 0, 0, 0);
 };
-/** 与前端 store.js 的 occDue 保持一致：算出某个任务在某天的截止时刻 */
+/** 与前端 store.js 的 occDue 保持一致：算出某个任务在某天的截止时刻
+    dueNextDay：每日任务的截止时刻落在次日（最晚 06:00），凌晨提交仍算前一天那一期 */
 function occDue(task, date) {
   const d = _startOfDay(date);
-  if (task.cycle === 'daily') return _atTime(_ymd(d), task.time);
+  if (task.cycle === 'daily') return _atTime(_ymd(_addDays(d, task.dueNextDay ? 1 : 0)), task.time);
   if (task.cycle === 'weekly') return _atTime(_ymd(_addDays(_startOfWeek(d), (task.weekday || 7) - 1)), task.time);
   if (task.cycle === 'monthly') {
     const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
@@ -784,11 +785,19 @@ app.post('/api/record/submit', requireAuth, (req, res) => {
   if (!task.storeIds.includes(storeId)) return res.status(403).json({ ok: false, msg: '该任务没有派给你的门店' });
 
   const key = String(periodKey);
-  const due = occDue(task, new Date());
-  /* 本期尚未生效（到期日早于生效日）→ 不允许提交，避免"刚发布就能交"的错乱 */
+  /* 次日截止的每日任务：逾期按「这条记录所属期次」的截止时刻判，不能按提交那一刻的当期
+     （凌晨 1 点交昨天那期，due 是今天 06:00，才判得对）。其他任务保持原逻辑，不动历史。 */
+  const _pd = (task.cycle === 'daily' && task.dueNextDay && /^\d{4}-\d{2}-\d{2}$/.test(key))
+    ? new Date(key + 'T00:00:00') : null;
+  const due = _pd ? occDue(task, _pd) : occDue(task, new Date());
+  /* 本期尚未生效（到期日早于生效日）→ 不允许提交，避免"刚发布就能交"的错乱
+     次日截止的任务再挡一层：期次那天本身早于生效日的，直接拒（前端也是这么判的） */
   if (task.startDate) {
     const startTs = new Date(task.startDate + 'T00:00:00').getTime();
     if (due.getTime() < startTs) {
+      return res.status(400).json({ ok: false, msg: '该任务本期尚未生效（' + task.startDate + ' 起执行），暂不能提交' });
+    }
+    if (task.cycle === 'daily' && task.dueNextDay && _pd && _pd.getTime() < startTs) {
       return res.status(400).json({ ok: false, msg: '该任务本期尚未生效（' + task.startDate + ' 起执行），暂不能提交' });
     }
   }

@@ -117,10 +117,10 @@ const canEditContacts = () => isCommittee() || isHR();
 const CYCLE_LABEL = { daily: '每日必做', weekly: '每周必做', monthly: '每月必做', once: '专项任务' };
 const CYCLE_TAG = { daily: 'tag-line', weekly: 'tag-line', monthly: 'tag-line', once: 'tag-line' };
 
-/** 该周期的截止时间 */
+/** 该周期的截止时间。dueNextDay：每日任务的截止时刻落在次日（最晚 06:00） */
 function occDue(t, date) {
   const d = startOfDay(date);
-  if (t.cycle === 'daily') return atTime(ymd(d), t.time);
+  if (t.cycle === 'daily') return atTime(ymd(addDays(d, t.dueNextDay ? 1 : 0)), t.time);
   if (t.cycle === 'weekly') return atTime(ymd(addDays(startOfWeek(d), (t.weekday || 7) - 1)), t.time);
   if (t.cycle === 'monthly') {
     const m = startOfMonth(d);
@@ -136,9 +136,23 @@ function occKey(t, date) {
   if (t.cycle === 'monthly') return monthKey(date);
   return 'once';
 }
+/**
+ * 此刻属于哪一期（期次的"那一天"）。
+ * 普通任务：就是今天。次日截止的每日任务：截止时刻前（凌晨 0 点–06:00）仍算前一天那一期，
+ * 所以门店这时打开看到的「今日」是昨天那期，提交也记到昨天。
+ */
+function periodDate(t, moment) {
+  const now = moment ? new Date(moment) : new Date();
+  const base = startOfDay(now);
+  if (!t || t.cycle !== 'daily' || !t.dueNextDay) return base;
+  return now.getTime() < atTime(ymd(base), t.time).getTime() ? addDays(base, -1) : base;
+}
 /** 该周期是否处于任务生效区间 */
 function taskActiveOn(t, date) {
   if (t.cycle === 'once') return true;
+  /* 次日截止：期次那天本身早于生效日 → 这期不该要。
+     不挡的话，新建当天会把"前一天那一期"（截止今晚之后）算成逾期未交。 */
+  if (t.cycle === 'daily' && t.dueNextDay && t.startDate && ymd(date) < t.startDate) return false;
   const due = occDue(t, date).getTime();
   if (t.startDate && due < atTime(t.startDate, '00:00').getTime()) return false;
   if (t.stopDate && due > atTime(t.stopDate, '23:59').getTime()) return false;
@@ -178,7 +192,8 @@ function firstDueAfter(task, fromDate) {
 
 /** 周期描述文案 */
 function cycleDesc(t) {
-  if (t.cycle === 'daily') return '每天 ' + t.time + ' 前';
+  const nd = (t.cycle === 'daily' && t.dueNextDay) ? '次日 ' : '';
+  if (t.cycle === 'daily') return '每天 ' + nd + t.time + ' 前';
   if (t.cycle === 'weekly') return '每周' + WD_CN[(t.weekday || 7) - 1] + ' ' + t.time + ' 前';
   if (t.cycle === 'monthly') return '每月 ' + (t.monthDay || 1) + ' 日 ' + t.time + ' 前';
   return '截止 ' + ymdhm(new Date(t.deadline));
@@ -238,11 +253,13 @@ function storeBuckets(storeId, day, now) {
   state.tasks.forEach(t => {
     if (t.status !== 'active') return;
     if (!t.storeIds.includes(storeId)) return;
-    const due0 = occDue(t, day);
-    const key0 = occKey(t, day);
+    /* 次日截止的任务，凌晨 0–6 点看的是前一天那一期 */
+    const pday = periodDate(t, day);
+    const due0 = occDue(t, pday);
+    const key0 = occKey(t, pday);
     const rec0 = getRecord(t.id, storeId, key0);
     /* 本期尚未生效（到期日早于生效日）→ 不进入今日/本周/本月，只进「全部」并标「待生效」 */
-    if (!taskActiveOn(t, day)) {
+    if (!taskActiveOn(t, pday)) {
       out.future.push({ task: t, due: due0, key: key0, rec: rec0, status: 'na', notStarted: true });
       return;
     }
@@ -256,6 +273,10 @@ function storeBuckets(storeId, day, now) {
       return;
     }
     if (st === 'overdue') { out.today.push(item); return; }
+    /* 次日截止的任务按「期次那天」归桶，不按截止时刻：
+       晚上 8 点看到的是今天这一期（截止明早 6 点），凌晨 1 点看到的是昨天那一期（截止今早 6 点），
+       两者都是「今日」要去做的活；按截止时刻归会掉到「本周」里去。 */
+    if (t.cycle === 'daily' && t.dueNextDay) { out.today.push(item); return; }
     const dt = due.getTime();
     if (dt >= ds && dt <= de) out.today.push(item);
     else if (dt >= ws && dt <= we) out.week.push(item);
@@ -301,12 +322,13 @@ function taskProgress(task, now, asOf) {
   const cut = asOf ? new Date(asOf) : nowD;
   const res = { expected: 0, done: 0, lateDone: 0, overdue: 0, dueSoon: 0, rejected: 0, rate: 0, cells: [] };
   const _joinOf = (id) => storeJoinYmd(id);
+  const pday = periodDate(task, nowD);
   task.storeIds.forEach(sid => {
-    if (task.status === 'active' && !taskActiveOn(task, nowD)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
-    const due = occDue(task, nowD);
+    if (task.status === 'active' && !taskActiveOn(task, pday)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
+    const due = occDue(task, pday);
     /* 门店还没加入（本期到期日早于加入日）→ 不参与本期统计 */
     if (_joinOf(sid) && ymd(due) < _joinOf(sid)) { res.cells.push({ storeId: sid, status: 'na' }); return; }
-    const key = occKey(task, nowD);
+    const key = occKey(task, pday);
     const rec0 = getRecord(task.id, sid, key);
     const rec = (rec0 && new Date(rec0.doneAt).getTime() > cut.getTime()) ? null : rec0;
     const st = occStatus(due, task, rec, nowD);
@@ -553,7 +575,7 @@ function firstDueFrom(task, sd) {
   const hh = Number(parts[0]) || 0, mm = Number(parts[1]) || 0;
   const base = new Date((sd || ymd(new Date())) + 'T00:00:00');
   if (task.cycle === 'daily') {
-    return new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm, 0);
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate() + (task.dueNextDay ? 1 : 0), hh, mm, 0);
   }
   if (task.cycle === 'weekly') {
     const wd = Number(task.weekday) || 7;                 // 1=周一 … 7=周日
@@ -659,7 +681,7 @@ async function submitDone(taskId, storeId, key, payload) {
     return r.record;
   }
   let rec = getRecord(taskId, storeId, key);
-  const due = occDue(t, new Date());
+  const due = occDue(t, periodDate(t, new Date()));
   const nowIso = new Date().toISOString();
   const isLate = new Date(nowIso).getTime() > due.getTime() + 60000;
   if (rec) {

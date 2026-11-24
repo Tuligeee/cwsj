@@ -633,7 +633,7 @@ function taskAdminCard(t, refresh) {
   const m = t.status === 'active' ? null : { label: '已停止', tag: 'tag-gray' };
   /* 状态只在异常时才上色：正常态中性，临期黄、逾期红、已停止灰 */
   const stCls = t.status !== 'active' ? ' st-stopped' : (p.overdue ? ' st-overdue' : p.dueSoon ? ' st-due' : '');
-  const openDetail = () => openTaskDetail({ task: t, due: occDue(t, new Date()), key: occKey(t, new Date()), rec: null, status: 'normal' });
+  const openDetail = () => { const _pd = periodDate(t, new Date()); return openTaskDetail({ task: t, due: occDue(t, _pd), key: occKey(t, _pd), rec: null, status: 'normal' }); };
   const card = h('div', {
     class: 'task-card hq-card' + stCls + (t.privacy ? ' is-private' : ''), dataset: { taskId: t.id || '' },
     title: '点击查看进度明细',
@@ -741,6 +741,34 @@ function openTaskForm(task, onDone, opts) {
     stopDate: inputNode({ type: 'date', value: d.stopDate || '' }),
     remind: null
   };
+  /* 次日截止（2026-11-24）：每日任务可设成「次日 00:00–06:00」截止。
+     凌晨关店的门店过了 0 点提交仍算前一天那一期，不会 0 点就变逾期。 */
+  let dueNextDay = !!d.dueNextDay;
+  const dueDayChips = h('div', { class: 'tabs', style: { marginTop: '8px' } });
+  const dueDayErr = h('div', { class: 'fhint', style: { margin: '4px 0 0', color: 'var(--danger)' }, text: '' });
+  const timeBox = h('div', {}, [ref.time, dueDayChips, dueDayErr]);
+  function dueNextDayBad() {
+    return cycle === 'daily' && dueNextDay && !!ref.time.value && ref.time.value > '06:00';
+  }
+  function paintDueDay() {
+    clear(dueDayChips);
+    if (cycle !== 'daily') {
+      dueNextDay = false; dueDayErr.textContent = '';
+      ref.time.classList.remove('inp-err');
+      return;
+    }
+    [[false, '当天'], [true, '次日']].forEach(([v, t]) => {
+      dueDayChips.appendChild(h('div', {
+        class: 'tab' + (v === dueNextDay ? ' active' : ''),
+        onclick: () => { dueNextDay = v; paintDueDay(); }
+      }, t));
+    });
+    const bad = dueNextDayBad();
+    ref.time.classList.toggle('inp-err', bad);
+    dueDayErr.textContent = bad ? '次日截止最晚 06:00，请把时刻改到 00:00–06:00 之间' : '';
+  }
+  ref.time.addEventListener('input', paintDueDay);
+  ref.time.addEventListener('change', paintDueDay);
   /* 实时校验：结束日期早于开始日期就立刻标红（2026-10-30） */
   function checkDateRange() {
     const bad = !!(ref.stopDate.value && ref.startDate.value && ref.stopDate.value < ref.startDate.value);
@@ -839,7 +867,7 @@ function openTaskForm(task, onDone, opts) {
     clear(dynBox);
     const rec = cycle !== 'once';
     dynBox.appendChild(h('div', { class: 'fgrid c2' }, [
-      fgroup('截止时刻', ref.time, '门店需在该时刻前完成并提交', true),
+      fgroup('截止时刻', timeBox, '门店需在该时刻前完成并提交'),
       cycle === 'daily'
         ? fgroup('开始显示时间（可选）', ref.showFrom, '留空 = 全天显示。晚班任务填 13:00，13 点前不出现在门店「今日」，只在折叠行里提示', false)
         : h('div', { style: { display: 'none' } }, [ref.showFrom]),
@@ -848,7 +876,8 @@ function openTaskForm(task, onDone, opts) {
           : cycle === 'once' ? fgroup('截止时间（日期+时间）', ref.deadline, '专项任务到点未完成即标红', true)
             : h('div', {})
     ]));
-    if (cycle === 'once') ref.time.parentNode && (ref.time.parentNode.style.display = 'none');
+    if (cycle === 'once') timeBox.style.display = 'none'; else timeBox.style.display = '';
+    paintDueDay();
     dynBox.appendChild(h('div', { class: 'fgrid c2' }, [
       fgroup(rec ? '生效开始日期' : '派发日期', ref.startDate, rec ? '循环任务从该日期起长期运行' : null, rec),
       rec ? fgroup('结束日期（可选）', ref.stopDate, '留空 = 长期运行不停', false) : h('div', {})
@@ -947,6 +976,7 @@ function openTaskForm(task, onDone, opts) {
           const storeIds = picker.get();
           if (!storeIds.length) { toast('请至少选择一家门店', 'err'); return; }
           if (cycle !== 'once' && !ref.time.value) { toast('请设置截止时刻', 'err'); return; }
+          if (dueNextDayBad()) { toast('次日截止最晚 06:00，请把时刻改到 00:00–06:00 之间', 'err'); return; }
           if (cycle === 'once' && !ref.deadline.value) { toast('请设置截止时间', 'err'); return; }
           /* 日期校验（2026-10-30）：截止不能早于现在；结束日期不能早于开始日期 */
           if (cycle === 'once') {
@@ -966,6 +996,7 @@ function openTaskForm(task, onDone, opts) {
           const payload = {
             title: title, content: content, cycle: cycle,
             time: cycle === 'once' ? (ref.deadline.value.slice(11, 16) || '18:00') : ref.time.value,
+            dueNextDay: (cycle === 'daily') ? !!dueNextDay : false,
             showFrom: (cycle === 'daily' && ref.showFrom.value) ? ref.showFrom.value : null,
             weekday: Number(ref.weekday.value), monthDay: Number(ref.monthDay.value),
             deadline: cycle === 'once' ? new Date(ref.deadline.value).toISOString() : null,
@@ -1449,7 +1480,7 @@ function openCellDetail(t, storeId, cell) {
   const s = getStore(storeId);
   const M = STATUS_META[cell ? cell.status : 'na'];
   const rec = cell ? cell.rec : null;
-  const due = cell ? cell.due : occDue(t, new Date());
+  const due = cell ? cell.due : occDue(t, periodDate(t, new Date()));
   const body = h('div', {}, [
     h('dl', { class: 'dl' }, [
       h('dt', {}, '门店'), h('dd', {}, s.name + '（店长 ' + s.mgr + '）'),

@@ -106,7 +106,13 @@ function periodKeyOf(task, due) {
 
 function occurrence(task, now) {
   const t = startOfDay(now);
-  if (task.cycle === 'daily') return { key: ymd(t), due: atTime(t, task.time) };
+  if (task.cycle === 'daily') {
+    /* 次日截止：凌晨未到截止时刻时，当前这一期还是昨天（提醒也跟着这一期走） */
+    if (task.dueNextDay && now.getTime() < atTime(t, task.time).getTime()) {
+      return { key: ymd(addDays(t, -1)), due: atTime(t, task.time) };
+    }
+    return { key: ymd(t), due: atTime(addDays(t, task.dueNextDay ? 1 : 0), task.time) };
+  }
   if (task.cycle === 'weekly') {
     const base = addDays(startOfWeek(t), (task.weekday || 7) - 1);
     return { key: ymd(base), due: atTime(base, task.time) };

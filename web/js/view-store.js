@@ -234,8 +234,9 @@ function storeTaskHistory(task, days, storeId) {
   const sid = storeId || me.id;
   const from = addDays(startOfDay(now), -(days - 1));
   const out = [];
-  const push = (due) => {
-    const key = occKey(task, due);
+  const loopKeys = new Set();
+  const push = (due, pk) => {
+    const key = pk || occKey(task, due);
     const rec = getRecord(task.id, sid, key);
     const st = occStatus(due, task, rec, now);
     out.push({ due: due, key: key, rec: rec, status: st, missed: !rec && due.getTime() < now.getTime() });
@@ -250,9 +251,12 @@ function storeTaskHistory(task, days, storeId) {
     const day = addDays(from, i);
     if (!taskActiveOn(task, day)) continue;
     const due = occDue(task, day);
-    if (ymd(due) !== ymd(day)) continue;          /* 只在"本期到期那天"记一行，避免重复 */
-    if (due.getTime() > now.getTime() && !getRecord(task.id, sid, occKey(task, day))) continue;  /* 还没到的那期不算 */
-    push(due);
+    /* 同一期只记一行（周/月任务会连续命中好几天；次日截止的每日任务 due 落在下一天） */
+    const k0 = occKey(task, day);
+    if (loopKeys.has(k0)) continue;
+    loopKeys.add(k0);
+    if (due.getTime() > now.getTime() && !getRecord(task.id, sid, k0)) continue;  /* 还没到的那期不算 */
+    push(due, k0);
   }
   /* 2026-11-16：提前提交（本期还没到期就交了）时，记录挂在"未来那一期"，
      上面的循环只走过去的日期，永远枚举不到 → 提交记录空白。
@@ -388,8 +392,9 @@ function openStoreTaskDetail(t, item, opt) {
   const storeObj = getStore(sid);
   const storeName = storeObj ? storeObj.name : sid;
   /* ---- 本期（卡片带过来的那一期）真实状态，不用跨店统计 ---- */
-  const curDue = item && item.due ? new Date(item.due) : occDue(t, new Date());
-  const curKey = item && item.key ? item.key : occKey(t, new Date());
+  const _curPd = periodDate(t, new Date());
+  const curDue = item && item.due ? new Date(item.due) : occDue(t, _curPd);
+  const curKey = item && item.key ? item.key : occKey(t, _curPd);
   const curRec = getRecord(t.id, sid, curKey);
   const curStatus = occStatus(curDue, t, curRec, new Date());
   const curMeta = STATUS_META[curStatus] || STATUS_META.normal;
