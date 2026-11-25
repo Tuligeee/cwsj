@@ -2596,7 +2596,7 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:16px;}
 .lqp-brand b{font-size:15px;letter-spacing:.3px;}
 .lqp-title{font-size:14px;color:var(--text-2);margin-bottom:14px;text-align:center;}
-.lqp-qr{width:190px;height:190px;display:flex;align-items:center;justify-content:center;
+.lqp-qr{position:relative;width:190px;height:190px;display:flex;align-items:center;justify-content:center;
   background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
 .lqp-qr img,.lqp-qr canvas{display:block;}
 .lqp-alt{margin-top:auto;padding-top:26px;text-align:center;}
@@ -2605,3 +2605,11 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   .login-qr-panel{display:none;}
   .login-alt-inline{display:block;}
 }
+
+/* 扫码状态遮罩：扫描成功 / 登录中 / 过期 */
+.qr-mask{position:absolute;inset:0;background:rgba(255,255,255,.95);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:8px;padding:12px;text-align:center;}
+.qr-mask.hidden{display:none;}
+.qr-mask-t{font-size:30px;font-weight:700;color:#1677FF;line-height:1;}
+.qr-mask-s{font-size:12.5px;color:var(--text-2);line-height:1.5;}
+.qr-mask.err .qr-mask-t{color:#F54A45;}

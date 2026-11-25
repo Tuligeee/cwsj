@@ -299,6 +299,79 @@ async function bindByMobile(userId, mobile) {
   return { ok: true, dingUserid, dingName };
 }
 
+/* ---------- 扫码登录（自己实现的「扫码 → 手机确认 → 电脑自动登录」）----------
+   钉钉控制台没有给我们「扫码登录」通道，所以二维码不编码钉钉授权地址，
+   而是编码我方一个落地页：手机钉钉扫码打开它 → 端内免登拿 userId →
+   回写这台电脑的会话；电脑端轮询状态，看到 approved 就直接登录。
+   状态机：waiting → scanned（手机打开了落地页）→ approved / failed。 */
+const qrSessions = new Map();
+const QR_TTL = 5 * 60 * 1000;
+
+function newQrSession() {
+  const t = crypto.randomBytes(16).toString('hex');
+  qrSessions.set(t, { status: 'waiting', at: Date.now() });
+  const cut = Date.now() - QR_TTL;
+  for (const [k, v] of qrSessions) if (v.at < cut) qrSessions.delete(k);
+  return t;
+}
+function getQr(t) {
+  const s = qrSessions.get(t);
+  if (!s) return null;
+  if (Date.now() - s.at > QR_TTL) { qrSessions.delete(t); return null; }
+  return s;
+}
+
+/* 手机端落地页：在钉钉里打开，自动拿免登码并回写 */
+function scanPage(token) {
+  const corp = CORP_ID || cachedCorp();
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>钉钉登录</title>
+<style>
+  html,body{height:100%;margin:0;background:#f5f6fa;font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2329}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;box-sizing:border-box}
+  .tick{width:64px;height:64px;border-radius:50%;background:#1677FF;color:#fff;display:flex;align-items:center;justify-content:center;font-size:32px}
+  .t{font-size:18px;font-weight:600}
+  .s{color:#646a73;font-size:14px}
+</style></head>
+<body><div class="wrap">
+  <div class="tick" id="tick">…</div>
+  <div class="t" id="title">正在登录</div>
+  <div class="s" id="sub">请稍候</div>
+</div>
+<script src="https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js"></script>
+<script>
+(function () {
+  var t = ${JSON.stringify(token)};
+  var corp = ${JSON.stringify(corp)};
+  var $t = document.getElementById('title'), $s = document.getElementById('sub'), $k = document.getElementById('tick');
+  function fail(msg) { $k.textContent = '!'; $k.style.background = '#F54A45'; $t.textContent = '登录失败'; $s.textContent = msg || '请回到电脑刷新重试'; }
+  fetch('api/auth/ding/qr/scanned?t=' + encodeURIComponent(t)).catch(function () {});
+  if (!window.dd || !dd.runtime) { fail('请在钉钉里打开这个页面'); return; }
+  dd.ready(function () {
+    dd.runtime.permission.requestAuthCode({
+      corpId: corp,
+      onSuccess: function (info) {
+        fetch('api/auth/ding/qr/confirm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ t: t, code: info.code })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (j && j.ok) {
+            $k.textContent = '✓';
+            $t.textContent = '已确认';
+            $s.textContent = '请在电脑上继续';
+          } else { fail((j && j.msg) || '确认失败'); }
+        }).catch(function () { fail('网络错误'); });
+      },
+      onFail: function (e) { fail((e && e.errorMessage) || '未取到免登码'); }
+    });
+  });
+  dd.error(function (e) { fail((e && e.errorMessage) || '钉钉 JSAPI 错误'); });
+})();
+</script></body></html>`;
+}
+
 /* ---------- 路由挂载（server.js 和单测共用同一份） ---------- */
 function mount(app, deps) {
   const sign = deps.sign;
@@ -355,6 +428,62 @@ function mount(app, deps) {
   });
 
   app.get('/api/auth/ding/callback', callback);
+
+  /* ---- 扫码登录：电脑出码 → 手机扫 → 手机确认 → 电脑自动登录 ---- */
+  app.get('/api/auth/ding/qr', (req, res) => {
+    try {
+      if (!BASE) throw new Error('没有配置 DING_LOGIN_BASE');
+      const t = newQrSession();
+      res.json({ ok: true, token: t, url: BASE + '/ding-scan?t=' + t });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  app.get('/api/auth/ding/qr/status', (req, res) => {
+    const s = getQr(String(req.query.t || ''));
+    if (!s) return res.json({ ok: false, status: 'expired' });
+    res.json({ ok: true, status: s.status, ticket: s.ticket || '', msg: s.msg || '' });
+  });
+
+  app.get('/api/auth/ding/qr/scanned', (req, res) => {
+    const s = getQr(String(req.query.t || ''));
+    if (s && s.status === 'waiting') s.status = 'scanned';
+    res.json({ ok: !!s });
+  });
+
+  app.post('/api/auth/ding/qr/confirm', async (req, res) => {
+    const t = String((req.body || {}).t || '');
+    const code = String((req.body || {}).code || '');
+    const s = getQr(t);
+    if (!s) return res.status(400).json({ ok: false, msg: '二维码已过期，请在电脑上刷新' });
+    try {
+      const dingUserid = await h5CodeToUserid(code);
+      const cands = candidatesOf(dingUserid);
+      if (!cands.length) {
+        s.status = 'failed';
+        s.msg = '这个钉钉号还没绑定平台账号';
+        return res.json({ ok: false, msg: s.msg });
+      }
+      s.status = 'approved';
+      s.ticket = issueTicket(dingUserid, cands);
+      res.json({ ok: true });
+    } catch (e) {
+      s.status = 'failed';
+      s.msg = e.message;
+      res.status(400).json({ ok: false, msg: e.message });
+    }
+  });
+
+  /* 手机扫码后打开的就是这一页（在钉钉客户端里，自动免登） */
+  app.get('/ding-scan', (req, res) => {
+    const t = String(req.query.t || '');
+    if (!getQr(t)) {
+      return res.status(410).type('html')
+        .send('<meta charset="utf-8"><p style="font:16px sans-serif;padding:24px">二维码已过期，请回到电脑刷新。</p>');
+    }
+    res.type('html').send(scanPage(t));
+  });
 
   /* 登录页用 ticket 换 token。一个钉钉号绑了多个账号时返回 NEED_PICK + 候选身份。 */
   app.post('/api/auth/ding/token', (req, res) => {

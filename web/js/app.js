@@ -667,17 +667,50 @@ function renderLogin() {
   paintLoginQr();
 }
 
-/* 登录页左侧二维码：授权地址由服务端生成（带 state），本地画成二维码 */
+/* 登录页左侧二维码：码里是「手机打开就免登」的落地页，电脑轮询状态，
+   手机确认后这台电脑自动登录（2026-11-25：钉钉没给扫码登录通道，自己实现） */
 function paintLoginQr() {
   const box = document.getElementById('login-qr');
   if (!box) return;
   if (inDingTalk()) { box.appendChild(h('div', { class: 'fhint' }, '钉钉内可直接进入')); return; }
-  fetch(Api.base + '/api/auth/ding/start-url')
+
+  const maskTitle = h('div', { class: 'qr-mask-t' });
+  const maskSub = h('div', { class: 'qr-mask-s' });
+  const mask = h('div', { class: 'qr-mask hidden' }, [maskTitle, maskSub]);
+  const showMask = (t, s, cls) => { maskTitle.textContent = t; maskSub.textContent = s || ''; mask.className = 'qr-mask' + (cls ? ' ' + cls : ''); };
+
+  fetch(Api.base + '/api/auth/ding/qr')
     .then(r => r.json())
     .then(j => {
       if (!j || !j.ok) { box.appendChild(h('div', { class: 'fhint' }, '二维码暂不可用')); return; }
       if (!window.QRCode) { box.appendChild(h('div', { class: 'fhint' }, '二维码组件没加载')); return; }
       new QRCode(box, { text: j.url, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M });
+      box.appendChild(mask);
+
+      let stop = false;
+      const tick = async () => {
+        if (stop) return;
+        try {
+          const s = await fetch(Api.base + '/api/auth/ding/qr/status?t=' + encodeURIComponent(j.token)).then(x => x.json());
+          if (s.status === 'scanned') {
+            showMask('✓', '扫描成功，请在手机上确认', 'ok');
+          } else if (s.status === 'approved') {
+            stop = true;
+            showMask('✓', '登录中…', 'ok');
+            const r = await Api.dingToken(s.ticket);
+            if (r && r.ok) { await afterLogin(r.user); return; }
+            if (r && r.code === 'NEED_PICK') { openDingPick(s.ticket, r.candidates || []); return; }
+            showMask('!', (r && r.msg) || '登录失败', 'err');
+            return;
+          } else if (s.status === 'failed') {
+            stop = true; showMask('!', s.msg || '登录失败', 'err'); return;
+          } else if (s.status === 'expired') {
+            stop = true; showMask('!', '二维码已过期', 'err'); return;
+          }
+        } catch (e) { /* 网络抖动忽略，下一轮再试 */ }
+        if (!stop) setTimeout(tick, 1500);
+      };
+      setTimeout(tick, 1200);
     })
     .catch(() => box.appendChild(h('div', { class: 'fhint' }, '二维码暂不可用')));
 }
