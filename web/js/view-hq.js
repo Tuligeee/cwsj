@@ -2663,7 +2663,7 @@ function pageAdmin() {
       phone: inputNode({ value: u.phone || '' })
     };
     const deptSel = selectNode(state.departments.map(d => ({ v: d, t: d })), u.dept);
-    let committee = !!u.committee, admin = !!u.admin;
+    let committee = !!u.committee, admin = !!u.admin, noNotify = !!u.noNotify;
     const permBox = h('div');
     function paintPerm() {
       clear(permBox);
@@ -2674,6 +2674,10 @@ function pageAdmin() {
       permBox.appendChild(h('label', { class: 'switch', style: { marginTop: '8px' } }, [
         (() => { const i = h('input', { type: 'checkbox' }); i.checked = admin; i.addEventListener('change', () => { admin = i.checked; paintPerm(); }); return i; })(),
         h('span', { text: '管理员（可进管理员后台管理门店 / 分区 / 部门 / 账号，并维护通讯录）' })
+      ]));
+      permBox.appendChild(h('label', { class: 'switch', style: { marginTop: '8px' } }, [
+        (() => { const i = h('input', { type: 'checkbox' }); i.checked = noNotify; i.addEventListener('change', () => { noNotify = i.checked; paintPerm(); }); return i; })(),
+        h('span', { text: '不接收钉钉提醒（站内消息照常，仍可钉钉登录）' })
       ]));
     }
     paintPerm();
@@ -2705,7 +2709,7 @@ function pageAdmin() {
             const patch = {
               name: ref.name.value.trim(), dept: deptSel.value, title: ref.title.value.trim(), phone: ref.phone.value.trim(),
               account, pwd: ref.pwd.value.trim(),
-              committee: committee, admin: admin
+              committee: committee, admin: admin, noNotify: noNotify
             };
             try {
               if (isNew) { await addHqUser(Object.assign({ duty: '' }, patch)); toast('账号已创建：' + account, 'ok'); }
