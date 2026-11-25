@@ -103,6 +103,36 @@
     return { ok: ok === true && no === false, detail: ok + '/' + no };
   });
 
+  /* ---------------- resolveStartDate：新建才顺延，编辑不动 ----------------
+     2026-11-25 社保处理事故回归：每月 20 日的任务在 25 号被编辑保存，
+     生效日被推到次月 1 日 → 本月全部门店「不适用」、门店端掉进「待生效」。 */
+  var ND = '2026-11-25T10:00:00+08:00';   /* 周三 */
+  t('resolveStartDate', '新建月任务：本月该日已过 → 顺延到次月 1 号', function () {
+    return eq(resolveStartDate({ cycle: 'monthly', monthDay: 20, startDate: '2026-11-25', now: ND }), '2026-12-01');
+  });
+  t('resolveStartDate', '新建月任务：本月该日未到 → 保留', function () {
+    return eq(resolveStartDate({ cycle: 'monthly', monthDay: 26, startDate: '2026-11-25', now: ND }), '2026-11-25');
+  });
+  t('resolveStartDate', '编辑月任务：本月该日已过也不动（社保处理回归）', function () {
+    return eq(resolveStartDate({ isEdit: true, cycle: 'monthly', monthDay: 20, startDate: '2026-10-31', now: ND }), '2026-10-31');
+  });
+  t('resolveStartDate', '编辑周任务：本周该天已过也不动', function () {
+    return eq(resolveStartDate({ isEdit: true, cycle: 'weekly', weekday: 1, startDate: '2026-11-16', now: ND }), '2026-11-16');
+  });
+  t('resolveStartDate', '新建周任务：本周该天已过 → 顺延到下个同星期', function () {
+    return eq(resolveStartDate({ cycle: 'weekly', weekday: 1, startDate: '2026-11-25', now: ND }), '2026-11-30');
+  });
+  t('resolveStartDate', 'monthDay 超过当月天数时按月末算，不误顺延', function () {
+    return eq(resolveStartDate({ cycle: 'monthly', monthDay: 31, startDate: '2026-11-25', now: ND }), '2026-11-25');
+  });
+  t('resolveStartDate', '每日 / 专项任务不顺延', function () {
+    return eq([resolveStartDate({ cycle: 'daily', startDate: '2026-10-01', now: ND }),
+      resolveStartDate({ cycle: 'once', startDate: '2026-10-01', now: ND })], ['2026-10-01', '2026-10-01']);
+  });
+  t('resolveStartDate', '没填开始日期 → 默认今天（本期没过的日子）', function () {
+    return eq(resolveStartDate({ cycle: 'monthly', monthDay: 26, now: ND }), ymd(new Date()));
+  });
+
   /* ---------------- 渲染 ---------------- */
   function render() {
     var rows = document.getElementById('rows');

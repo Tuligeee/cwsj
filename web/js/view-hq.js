@@ -1004,30 +1004,15 @@ function openTaskForm(task, onDone, opts) {
             privacy: privacy, visibleTo: privacy ? Array.from(visibleSet) : [],
             remindBeforeMin: Number(remindMin) || 0, remindOverdue: remindOverdue,
             images: images.slice(), links: links.filter(l => l.url && /^https?:/i.test(l.url)),
-            startDate: (function () {
-              /* 周期任务：若本期已过（月任务 monthDay 已过 / 周任务本周该天已过），
-                 自动把生效日顺延到下一个周期的起点，避免"刚发布就逾期" */
-              const sd = ref.startDate.value || ymd(new Date());
-              const now = new Date();
-              if (cycle === 'monthly') {
-                const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-                const day = Math.min(Number(ref.monthDay.value) || 1, last);
-                if (day < now.getDate()) {
-                  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-                  return ymd(next);
-                }
-              }
-              if (cycle === 'weekly') {
-                const wd = Number(ref.weekday.value) || 7;      // 1=周一 … 7=周日
-                const curWd = now.getDay() === 0 ? 7 : now.getDay();
-                if (wd < curWd) {
-                  const ahead = 7 - curWd + wd;                  // 到下个周几还有几天
-                  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ahead);
-                  return ymd(next);
-                }
-              }
-              return sd;
-            })(),
+            /* 只有「新建」才把生效日顺延到下一个周期；编辑已下发任务原样保留，
+               否则改一次门店就把本期整期作废（2026-11-25 社保处理踩过） */
+            startDate: resolveStartDate({
+              isEdit: isEdit,
+              startDate: ref.startDate.value,
+              cycle: cycle,
+              monthDay: Number(ref.monthDay.value),
+              weekday: Number(ref.weekday.value)
+            }),
             stopDate: (cycle !== 'once' && ref.stopDate.value) ? ref.stopDate.value : null,
             dept: me.dept
           };
