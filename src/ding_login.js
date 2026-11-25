@@ -1,0 +1,544 @@
+'use strict';
+/* =========================================================
+   ding_login.js — 钉钉登录（扫码 / 钉钉内免登）
+   2026-11-24 新增。设计要点：
+   · 只认**域名**：钉钉回调地址必须是域名，IP 直连不可用
+   · 会话不变：换到人之后仍然签 auth.sign() 那套 JWT，前端一行都不用改
+   · token 不进 URL：回调只带回一次性 ticket（5 分钟），前端再换 token
+   · 一个钉钉号可能绑多个账号（ding_map 反向不唯一）→ 回多个身份让用户选
+   · DING_MOCK=1 时跳过钉钉网络，用 code 直接当 userid，供本地联调
+   ========================================================= */
+const crypto = require('crypto');
+const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const { db } = require('./db');
+const { SECRET } = require('./auth');
+const ding = require('./ding');
+
+const API2 = 'https://api.dingtalk.com';
+const OAPI = 'https://oapi.dingtalk.com';
+
+/* 回调域名前缀：线上 https://mancado.cn/cwsj，测试 https://mancado.cn/cwsj/cwsj-stg
+   必须显式配置 —— nginx 会剥掉挂载前缀，服务端自己推不出来。 */
+const BASE = (process.env.DING_LOGIN_BASE || '').replace(/\/+$/, '');
+const MOCK = process.env.DING_MOCK === '1';
+
+/* ---------- 登录专用凭据 ----------
+   扫码登录要的是「开了网页应用能力」的那个应用的 AppKey/AppSecret，
+   而机器人用的是另一个（现在恰好是同一个）。
+   允许用 DING_LOGIN_APP_KEY / DING_LOGIN_APP_SECRET 单独指定，
+   没配就回落到机器人那套。不经过 ding.loadEnv()，因为它强制要求 ROBOT_CODE。 */
+const ENV_FILE = process.env.DING_ENV_FILE || '/opt/cwsj/.ding.env';
+const CORP_FILE = require('path').join(process.env.DATA_DIR || '/opt/cwsj-stg/data', 'ding.corp');
+
+/* 企业 CorpId 缓存：OAuth 换 token 的响应里带 corpId，第一次登录时存下来。
+   从钉钉消息里的链接打开时 URL 上没有 corpid，免登签名要靠它。 */
+function saveCorp(id) {
+  try { fs.writeFileSync(CORP_FILE, String(id)); } catch (e) { /* 写不进去不影响登录 */ }
+}
+function cachedCorp() {
+  try { return fs.readFileSync(CORP_FILE, 'utf8').trim(); } catch (e) { return ''; }
+}
+
+function readEnvFile() {
+  const out = {};
+  try {
+    fs.readFileSync(ENV_FILE, 'utf8').split('\n').forEach(line => {
+      const s = line.trim();
+      if (!s || s.startsWith('#')) return;
+      const i = s.indexOf('=');
+      if (i < 0) return;
+      out[s.slice(0, i).trim()] = s.slice(i + 1).trim().replace(/^["']|["']$/g, '');
+    });
+  } catch (e) { /* 读不到就交给调用方报错 */ }
+  return out;
+}
+
+function loadLoginEnv() {
+  const env = readEnvFile();
+  const key = env.DING_LOGIN_APP_KEY || env.DINGTALK_APP_KEY || process.env.DING_LOGIN_APP_KEY;
+  const secret = env.DING_LOGIN_APP_SECRET || env.DINGTALK_APP_SECRET || process.env.DING_LOGIN_APP_SECRET;
+  if (!key || !secret) throw new Error('没有登录用的钉钉应用凭据（DING_LOGIN_APP_KEY / DING_LOGIN_APP_SECRET 或 DINGTALK_APP_KEY / SECRET）');
+  return { key, secret };
+}
+
+/* ding_map / ding_people 两张表历史上是手工在服务器上建的，仓库里没有建表语句。
+   这里补一份 IF NOT EXISTS：新库（比如重建的测试库）也能跑，老库不受影响。 */
+function ensureSchema() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ding_map (
+      user_id     TEXT PRIMARY KEY,
+      ding_userid TEXT NOT NULL,
+      ding_name   TEXT,
+      source      TEXT,
+      updated_by  TEXT,
+      updated_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ding_map_userid ON ding_map (ding_userid);
+    CREATE TABLE IF NOT EXISTS ding_people (
+      userid     TEXT PRIMARY KEY,
+      name       TEXT,
+      title      TEXT,
+      depts      TEXT,
+      updated_at TEXT
+    );
+  `);
+}
+
+/* ---------- state：防 CSRF，10 分钟有效 ---------- */
+const states = new Map();
+function newState() {
+  const s = crypto.randomBytes(16).toString('hex');
+  states.set(s, Date.now());
+  const cut = Date.now() - 10 * 60 * 1000;
+  for (const [k, t] of states) if (t < cut) states.delete(k);
+  return s;
+}
+function takeState(s) {
+  const t = states.get(s);
+  if (!t) return false;
+  states.delete(s);
+  return Date.now() - t < 10 * 60 * 1000;
+}
+
+/* ---------- 钉钉侧：code → 企业 userId ---------- */
+async function codeToDingUserid(code) {
+  if (MOCK) return String(code);            // 本地联调：code 就是 userid
+
+  const env = loadLoginEnv();
+  const r = await fetch(API2 + '/v1.0/oauth2/userAccessToken', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientId: env.key,
+      clientSecret: env.secret,
+      code,
+      grantType: 'authorization_code',
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.accessToken) {
+    throw new Error('换 accessToken 失败：' + (j.message || j.code || ('HTTP ' + r.status)));
+  }
+  /* 顺手把企业 CorpId 存下来：从钉钉消息里的链接打开时 URL 上没有 corpid，
+     免登要靠这个缓存值签名，否则只能退回密码登录。 */
+  if (j.corpId) saveCorp(j.corpId);
+
+  const me = await fetch(API2 + '/v1.0/contact/users/me', {
+    headers: { 'x-acs-dingtalk-access-token': j.accessToken },
+  }).then(x => x.json().catch(() => ({})));
+  if (!me.unionId) throw new Error('没拿到 unionId：' + (me.message || 'unknown'));
+
+  /* unionId → 企业内 userId（ding_map 存的是 userId） */
+  const tok = await ding.getToken();
+  const u = await fetch(OAPI + '/topapi/user/getbyunionid?access_token=' + encodeURIComponent(tok), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unionid: me.unionId }),
+  }).then(x => x.json().catch(() => ({})));
+  if (u.errcode !== 0 || !u.result || !u.result.userid) {
+    throw new Error('该钉钉号不在本企业通讯录里（' + (u.errmsg || u.errcode) + '）');
+  }
+  return u.result.userid;
+}
+
+/* ---------- 本地：钉钉 userid → 平台账号 ---------- */
+function candidatesOf(dingUserid) {
+  return db.prepare(
+    'SELECT u.id, u.type, u.name, u.account FROM users u '
+    + 'JOIN ding_map m ON m.user_id = u.id '
+    + 'WHERE m.ding_userid = ? AND u.enabled = 1 ORDER BY u.type DESC, u.id'
+  ).all(dingUserid);
+}
+
+function publicUser(row) {
+  return { id: row.id, type: row.type, name: row.name, account: row.account };
+}
+
+/* ---------- 路由 ---------- */
+function startUrl(stateOverride) {
+  if (!BASE) throw new Error('没有配置 DING_LOGIN_BASE（例：https://mancado.cn/cwsj/cwsj-stg）');
+  let key;
+  try {
+    key = loadLoginEnv().key;
+  } catch (e) {
+    if (!MOCK) throw e;                       // 真跑必须凭据齐全；本地 mock 允许没有 .ding.env
+    key = 'mock-app-key';
+  }
+  const state = stateOverride || newState();
+  if (stateOverride) states.set(state, Date.now());   // 扫码通道用 'qr:<token>' 当 state
+  const redirect = BASE + '/api/auth/ding/callback';
+  const q = new URLSearchParams({
+    redirect_uri: redirect,
+    response_type: 'code',
+    client_id: key,
+    scope: 'openid',
+    state,
+    prompt: 'consent',
+  });
+  return 'https://login.dingtalk.com/oauth2/auth?' + q.toString();
+}
+
+/* 回调成功：签一张 5 分钟 ticket，把人带回登录页（token 不进 URL） */
+function issueTicket(dingUserid, cands) {
+  return jwt.sign({ k: 'ding', d: dingUserid, u: cands.map(c => c.id) }, SECRET, { expiresIn: '5m' });
+}
+
+function readTicket(ticket) {
+  const p = jwt.verify(ticket, SECRET);
+  if (!p || p.k !== 'ding') throw new Error('票据无效');
+  return p;
+}
+
+async function callback(req, res) {
+  const back = BASE || '';
+  const fail = (msg) => res.redirect(302, back + '/?ding_err=' + encodeURIComponent(msg));
+  try {
+    const { code, state } = req.query;
+    if (!code) return fail('钉钉没有返回授权码');
+    if (!state || !takeState(state)) return fail('授权已过期，请重新点击钉钉登录');
+
+    /* 扫码通道：state = 'qr:<token>'。手机授权完回写会话，桌面端轮询到就自动登录 */
+    if (String(state).indexOf('qr:') === 0) {
+      const t = String(state).slice(3);
+      const s = getQr(t);
+      if (!s) return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&expired=1');
+      try {
+        const uid = await codeToDingUserid(String(code));
+        const cands2 = candidatesOf(uid);
+        if (!cands2.length) {
+          s.status = 'failed'; s.msg = '这个钉钉号还没绑定平台账号';
+          return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&err=' + encodeURIComponent(s.msg));
+        }
+        s.status = 'approved';
+        s.ticket = issueTicket(uid, cands2);
+        return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&done=1');
+      } catch (e) {
+        s.status = 'failed'; s.msg = e.message || '登录失败';
+        return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&err=' + encodeURIComponent(s.msg));
+      }
+    }
+
+    const dingUserid = await codeToDingUserid(String(code));
+    const cands = candidatesOf(dingUserid);
+    if (!cands.length) return fail('这个钉钉号还没绑定平台账号，请先用账号密码登录后在「钉钉提醒」里绑定');
+
+    const ticket = issueTicket(dingUserid, cands);
+    /* 单个身份直接换；多个身份去选人页 */
+    return res.redirect(302, back + '/?ding=' + encodeURIComponent(ticket)
+      + (cands.length > 1 ? '&pick=1' : ''));
+  } catch (e) {
+    return fail(e.message || '钉钉登录失败');
+  }
+}
+
+/* 用 ticket 换 token：cands 里只有一个时才允许直接换 */
+function exchange(ticket) {
+  const p = readTicket(ticket);
+  const cands = candidatesOf(p.d).filter(c => p.u.includes(c.id));
+  if (!cands.length) throw new Error('该账号已停用或绑定已解除');
+  if (cands.length > 1) {
+    const err = new Error('这个钉钉号绑了多个账号，请选择要进入的身份');
+    err.code = 'NEED_PICK';
+    err.candidates = cands.map(publicUser);
+    throw err;
+  }
+  return cands[0];
+}
+
+/* ---------- 钉钉内免登（H5 / JSAPI） ----------
+   2026-11-24：这个企业的控制台不提供「扫码登录」能力（所有参数组合都回 900103
+   Application does not exist），网页应用能力描述写的就是「免登」，所以主路径改成：
+   在钉钉里打开 → dd.runtime.permission.requestAuthCode → 服务端换 userId。
+   依赖：DING_CORP_ID（企业 CorpId）、DING_AGENT_ID（默认 4738071575）。 */
+const CORP_ID = process.env.DING_CORP_ID || '';
+const AGENT_ID = process.env.DING_AGENT_ID || '4738071575';
+
+let _jsapi = { ticket: '', exp: 0 };
+
+async function getJsapiTicket() {
+  if (_jsapi.ticket && Date.now() < _jsapi.exp - 60000) return _jsapi.ticket;
+  const tok = await ding.getToken();
+  const j = await fetch(OAPI + '/get_jsapi_ticket?access_token=' + encodeURIComponent(tok))
+    .then(x => x.json()).catch(() => ({}));
+  if (j.errcode !== 0 || !j.ticket) throw new Error('取 jsapi_ticket 失败：' + (j.errmsg || j.errcode));
+  _jsapi = { ticket: j.ticket, exp: Date.now() + (j.expires_in || 7200) * 1000 };
+  return _jsapi.ticket;
+}
+
+/* dd.config 签名。corpId 优先用调用方给的（钉钉打开网页应用时会在 URL 上带），
+   没有再回落到环境变量 —— 这样没拿到企业 CorpId 也能先跑起来。 */
+async function jsapiConfig(url, corpIdFromClient) {
+  const corp = /^ding[0-9A-Za-z]{10,}$/.test(String(corpIdFromClient || ''))
+    ? String(corpIdFromClient)
+    : (CORP_ID || cachedCorp());
+  if (!corp) throw new Error('没有配置 DING_CORP_ID（企业 CorpId），免登录用不了');
+  const ticket = await getJsapiTicket();
+  const nonceStr = crypto.randomBytes(8).toString('hex');
+  const timeStamp = String(Math.floor(Date.now() / 1000));
+  const plain = 'jsapi_ticket=' + ticket + '&noncestr=' + nonceStr + '&timestamp=' + timeStamp + '&url=' + url;
+  const signature = crypto.createHash('sha1').update(plain).digest('hex');
+  return { corpId: corp, agentId: AGENT_ID, timeStamp, nonceStr, signature };
+}
+
+/* 免登码 → 企业 userId */
+async function h5CodeToUserid(code) {
+  if (MOCK) return String(code);
+  const tok = await ding.getToken();
+  const j = await fetch(OAPI + '/topapi/user/getuserinfo?access_token=' + encodeURIComponent(tok), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  }).then(x => x.json()).catch(() => ({}));
+  if (j.errcode !== 0 || !j.result || !j.result.userid) {
+    throw new Error('免登码换 userId 失败：' + (j.errmsg || j.errcode));
+  }
+  return j.result.userid;
+}
+
+/* ---------- 按手机号自动绑定 ----------
+   建账号时如果账号就是手机号（1 开头 11 位），直接查钉钉通讯录绑上，
+   省掉管理员再去「钉钉提醒 → 账号绑定」里手点一遍。查不到就静默跳过。 */
+async function bindByMobile(userId, mobile) {
+  const m = String(mobile || '').trim();
+  if (!/^1\d{10}$/.test(m)) return { ok: false, reason: '不是手机号' };
+  const tok = await ding.getToken();
+  const j = await fetch(OAPI + '/topapi/v2/user/getbymobile?access_token=' + encodeURIComponent(tok), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mobile: m }),
+  }).then(x => x.json()).catch(() => ({}));
+  if (j.errcode !== 0 || !j.result || !j.result.userid) {
+    return { ok: false, reason: '钉钉通讯录里查不到这个手机号（' + (j.errmsg || j.errcode) + '）' };
+  }
+  const dingUserid = j.result.userid;
+  const p = db.prepare('SELECT name FROM ding_people WHERE userid = ?').get(dingUserid);
+  const dingName = (p && p.name) || '';
+  db.prepare('INSERT INTO ding_map (user_id, ding_userid, ding_name, source, updated_by, updated_at) '
+    + 'VALUES (?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET ding_userid=excluded.ding_userid, '
+    + 'ding_name=excluded.ding_name, source=excluded.source, updated_by=excluded.updated_by, updated_at=excluded.updated_at')
+    .run(userId, dingUserid, dingName, 'auto-mobile', 'system', new Date().toISOString());
+  return { ok: true, dingUserid, dingName };
+}
+
+/* ---------- 扫码登录（自己实现的「扫码 → 手机确认 → 电脑自动登录」）----------
+   钉钉控制台没有给我们「扫码登录」通道，所以二维码不编码钉钉授权地址，
+   而是编码我方一个落地页：手机钉钉扫码打开它 → 端内免登拿 userId →
+   回写这台电脑的会话；电脑端轮询状态，看到 approved 就直接登录。
+   状态机：waiting → scanned（手机打开了落地页）→ approved / failed。 */
+const qrSessions = new Map();
+const QR_TTL = 5 * 60 * 1000;
+
+function newQrSession() {
+  const t = crypto.randomBytes(16).toString('hex');
+  qrSessions.set(t, { status: 'waiting', at: Date.now() });
+  const cut = Date.now() - QR_TTL;
+  for (const [k, v] of qrSessions) if (v.at < cut) qrSessions.delete(k);
+  return t;
+}
+function getQr(t) {
+  const s = qrSessions.get(t);
+  if (!s) return null;
+  if (Date.now() - s.at > QR_TTL) { qrSessions.delete(t); return null; }
+  return s;
+}
+
+/* 手机端落地页：
+   扫码后打开这一页 → 标记「已扫描」→ 直接跳到钉钉授权页（走的是验证过的 OAuth 通道）
+   授权回来落在 /api/auth/ding/callback（state=qr:<token>）→ 回写会话 → 桌面端轮询到就登录。
+   不用 JSAPI 免登：这台应用调 topapi/user/getuserinfo 报「远程服务不存在」。 */
+function scanPage(token, opt) {
+  const o = opt || {};
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>钉钉登录</title>
+<style>
+  html,body{height:100%;margin:0;background:#f5f6fa;font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2329}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;box-sizing:border-box}
+  .tick{width:64px;height:64px;border-radius:50%;background:#1677FF;color:#fff;display:flex;align-items:center;justify-content:center;font-size:32px}
+  .tick.bad{background:#F54A45}
+  .t{font-size:18px;font-weight:600}
+  .s{color:#646a73;font-size:14px}
+</style></head>
+<body><div class="wrap">
+  <div class="tick" id="tick">…</div>
+  <div class="t" id="title">正在跳转钉钉授权</div>
+  <div class="s" id="sub">请稍候</div>
+</div>
+<script>
+(function () {
+  var t = ${JSON.stringify(token)};
+  var done = ${o.done ? 'true' : 'false'};
+  var err = ${JSON.stringify(o.err || '')};
+  var $t = document.getElementById('title'), $s = document.getElementById('sub'), $k = document.getElementById('tick');
+  if (err) { $k.textContent = '!'; $k.className = 'tick bad'; $t.textContent = '登录失败'; $s.textContent = err; return; }
+  if (done) { $k.textContent = '✓'; $t.textContent = '已确认'; $s.textContent = '请在电脑上继续'; return; }
+  fetch('api/auth/ding/qr/scanned?t=' + encodeURIComponent(t)).catch(function () {});
+  location.replace('api/auth/ding/start?qr=' + encodeURIComponent(t));
+})();
+</script></body></html>`;
+}
+
+/* ---------- 路由挂载（server.js 和单测共用同一份） ---------- */
+function mount(app, deps) {
+  const sign = deps.sign;
+  const log = deps.log || (() => {});
+  ensureSchema();
+
+  app.get('/api/auth/ding/jsapi', async (req, res) => {
+    try {
+      const url = String(req.query.url || '');
+      if (!url) return res.status(400).json({ ok: false, msg: '缺少页面地址' });
+      res.json(Object.assign({ ok: true }, await jsapiConfig(url, req.query.corpId)));
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  app.post('/api/auth/ding/h5', async (req, res) => {
+    const code = String((req.body || {}).code || '');
+    if (!code) return res.status(400).json({ ok: false, msg: '缺少免登码' });
+    try {
+      const dingUserid = await h5CodeToUserid(code);
+      const cands = candidatesOf(dingUserid);
+      if (!cands.length) {
+        return res.json({ ok: false, msg: '这个钉钉号还没绑定平台账号，请先用账号密码登录后在「钉钉提醒」里绑定' });
+      }
+      if (cands.length > 1) {
+        return res.json({ ok: false, code: 'NEED_PICK', msg: '这个钉钉号绑了多个账号，请选择身份',
+          candidates: cands.map(publicUser), ticket: issueTicket(dingUserid, cands) });
+      }
+      const row = cands[0];
+      const token = sign({ id: row.id, type: row.type });
+      log(row.id, 'login.ding.h5', row.name);
+      res.json({ ok: true, token, user: publicUser(row) });
+    } catch (e) {
+      res.status(400).json({ ok: false, msg: e.message });
+    }
+  });
+
+  app.get('/api/auth/ding/start', (req, res) => {
+    try {
+      /* 扫码通道：手机端带着 qr=<token> 来，state 用 qr:<token>，回调时才知道回写给哪个会话 */
+      const qr = String(req.query.qr || '');
+      if (qr) {
+        if (!getQr(qr)) {
+          return res.redirect(302, (BASE || '') + '/ding-scan?t=' + encodeURIComponent(qr) + '&expired=1');
+        }
+        return res.redirect(302, startUrl('qr:' + qr));
+      }
+      res.redirect(302, startUrl());
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  /* 给登录页的二维码用：返回授权地址而不是 302，前端自己渲染成二维码 */
+  app.get('/api/auth/ding/start-url', (req, res) => {
+    try {
+      res.json({ ok: true, url: startUrl() });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  app.get('/api/auth/ding/callback', callback);
+
+  /* ---- 扫码登录：电脑出码 → 手机扫 → 手机确认 → 电脑自动登录 ---- */
+  app.get('/api/auth/ding/qr', (req, res) => {
+    try {
+      if (!BASE) throw new Error('没有配置 DING_LOGIN_BASE');
+      const t = newQrSession();
+      res.json({ ok: true, token: t, url: BASE + '/ding-scan?t=' + t });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  app.get('/api/auth/ding/qr/status', (req, res) => {
+    const s = getQr(String(req.query.t || ''));
+    if (!s) return res.json({ ok: false, status: 'expired' });
+    res.json({ ok: true, status: s.status, ticket: s.ticket || '', msg: s.msg || '' });
+  });
+
+  app.get('/api/auth/ding/qr/scanned', (req, res) => {
+    const s = getQr(String(req.query.t || ''));
+    if (s && s.status === 'waiting') s.status = 'scanned';
+    res.json({ ok: !!s });
+  });
+
+  app.post('/api/auth/ding/qr/confirm', async (req, res) => {
+    const t = String((req.body || {}).t || '');
+    const code = String((req.body || {}).code || '');
+    const s = getQr(t);
+    if (!s) return res.status(400).json({ ok: false, msg: '二维码已过期，请在电脑上刷新' });
+    try {
+      const dingUserid = await h5CodeToUserid(code);
+      const cands = candidatesOf(dingUserid);
+      if (!cands.length) {
+        s.status = 'failed';
+        s.msg = '这个钉钉号还没绑定平台账号';
+        return res.json({ ok: false, msg: s.msg });
+      }
+      s.status = 'approved';
+      s.ticket = issueTicket(dingUserid, cands);
+      res.json({ ok: true });
+    } catch (e) {
+      s.status = 'failed';
+      s.msg = e.message;
+      res.status(400).json({ ok: false, msg: e.message });
+    }
+  });
+
+  /* 手机扫码后打开的就是这一页（在钉钉客户端里，自动免登） */
+  app.get('/ding-scan', (req, res) => {
+    const t = String(req.query.t || '');
+    if (!getQr(t)) {
+      return res.status(410).type('html')
+        .send('<meta charset="utf-8"><p style="font:16px sans-serif;padding:24px">二维码已过期，请回到电脑刷新。</p>');
+    }
+    res.type('html').send(scanPage(t, {
+      done: req.query.done === '1',
+      err: req.query.err ? String(req.query.err) : (req.query.expired === '1' ? '二维码已过期，请回到电脑刷新' : ''),
+    }));
+  });
+
+  /* 登录页用 ticket 换 token。一个钉钉号绑了多个账号时返回 NEED_PICK + 候选身份。 */
+  app.post('/api/auth/ding/token', (req, res) => {
+    const ticket = String((req.body || {}).ticket || '');
+    if (!ticket) return res.status(400).json({ ok: false, msg: '缺少登录票据' });
+    try {
+      const row = exchange(ticket);
+      const token = sign({ id: row.id, type: row.type });
+      log(row.id, 'login.ding', row.name);
+      res.json({ ok: true, token, user: publicUser(row) });
+    } catch (e) {
+      if (e.code === 'NEED_PICK') {
+        return res.json({ ok: false, code: 'NEED_PICK', msg: e.message, candidates: e.candidates });
+      }
+      res.status(400).json({ ok: false, msg: e.message });
+    }
+  });
+
+  /* 选身份后签发同一套 token */
+  app.post('/api/auth/ding/pick', (req, res) => {
+    const { ticket, userId } = req.body || {};
+    try {
+      const p = readTicket(String(ticket || ''));
+      const wanted = String(userId || '');
+      if (!p.u.includes(wanted)) return res.status(400).json({ ok: false, msg: '身份不匹配，请重新登录' });
+      const row = candidatesOf(p.d).find(c => c.id === wanted);
+      if (!row) return res.status(400).json({ ok: false, msg: '该账号已停用或绑定已解除' });
+      const token = sign({ id: row.id, type: row.type });
+      log(row.id, 'login.ding', row.name);
+      res.json({ ok: true, token, user: publicUser(row) });
+    } catch (e) {
+      res.status(400).json({ ok: false, msg: e.message });
+    }
+  });
+}
+
+module.exports = {
+  mount, ensureSchema, startUrl, callback, exchange, candidatesOf, publicUser, readTicket, bindByMobile, MOCK, BASE,
+};

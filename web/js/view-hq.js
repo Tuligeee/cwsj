@@ -1004,30 +1004,15 @@ function openTaskForm(task, onDone, opts) {
             privacy: privacy, visibleTo: privacy ? Array.from(visibleSet) : [],
             remindBeforeMin: Number(remindMin) || 0, remindOverdue: remindOverdue,
             images: images.slice(), links: links.filter(l => l.url && /^https?:/i.test(l.url)),
-            startDate: (function () {
-              /* 周期任务：若本期已过（月任务 monthDay 已过 / 周任务本周该天已过），
-                 自动把生效日顺延到下一个周期的起点，避免"刚发布就逾期" */
-              const sd = ref.startDate.value || ymd(new Date());
-              const now = new Date();
-              if (cycle === 'monthly') {
-                const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-                const day = Math.min(Number(ref.monthDay.value) || 1, last);
-                if (day < now.getDate()) {
-                  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-                  return ymd(next);
-                }
-              }
-              if (cycle === 'weekly') {
-                const wd = Number(ref.weekday.value) || 7;      // 1=周一 … 7=周日
-                const curWd = now.getDay() === 0 ? 7 : now.getDay();
-                if (wd < curWd) {
-                  const ahead = 7 - curWd + wd;                  // 到下个周几还有几天
-                  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ahead);
-                  return ymd(next);
-                }
-              }
-              return sd;
-            })(),
+            /* 只有「新建」才把生效日顺延到下一个周期；编辑已下发任务原样保留，
+               否则改一次门店就把本期整期作废（2026-11-25 社保处理踩过） */
+            startDate: resolveStartDate({
+              isEdit: isEdit,
+              startDate: ref.startDate.value,
+              cycle: cycle,
+              monthDay: Number(ref.monthDay.value),
+              weekday: Number(ref.weekday.value)
+            }),
             stopDate: (cycle !== 'once' && ref.stopDate.value) ? ref.stopDate.value : null,
             dept: me.dept
           };
@@ -1911,17 +1896,23 @@ function openAssessSettingsModal(onDone) {
 /* =========================================================
    管理员后台（门店 / 分区 / 部门 / 账号 / 权限）
    ========================================================= */
+/* 管理员后台当前子页。放模块级而不是 pageAdmin 内部：
+   页面被重新渲染（切回浏览器标签触发的静默刷新、保存后重绘）时不会跳回「门店与分区」。
+   2026-11-25 用户反馈：点进「部门与账号」过一会儿自己跳回去。 */
+let _adminTab = 'store';
+let _dingSub = 'bind';   /* 钉钉提醒的子页：账号绑定 / 发送记录 */
+
 function pageAdmin() {
   if (!isAdmin()) return emptyNode('仅管理员可访问此页面', '🔒');
   const wrap = h('div');
-  let tab = 'store';
+  let tab = _adminTab;
   const tabsBar = h('div', { class: 'tabs chip-tabs m2-keep' });
   const body = h('div');
 
   function paint() {
     clear(tabsBar);
     [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒']].forEach(([k, l]) => {
-      tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; paint(); } }, l));
+      tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; _adminTab = k; paint(); } }, l));
     });
     clear(body);
     if (tab === 'store') paintStoreTab();
@@ -2145,19 +2136,20 @@ function pageAdmin() {
 
   /* ---------- 钉钉提醒 ---------- */
   const DING_AUTH = () => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') });
-  let dFilter = 'all', dq = '', dSub = 'bind';
+  let dFilter = 'all', dq = '';
   function paintDingTab() {
-    /* 子切换：账号绑定 / 发送记录（原「提醒记录」独立页并入这里） */
+    /* 子切换：账号绑定 / 发送记录（原「提醒记录」独立页并入这里）
+       dSub 放模块级：静默刷新重绘时不跳回「账号绑定」 */
     const subBar = h('div', { class: 'tabs chip-tabs m2-keep dg-sub' });
     const pane = h('div');
     [['bind', '账号绑定'], ['log', '发送记录']].forEach(([k, l]) => {
       subBar.appendChild(h('div', {
-        class: 'tab' + (dSub === k ? ' active' : ''), onclick: () => { dSub = k; paint(); }
+        class: 'tab' + (_dingSub === k ? ' active' : ''), onclick: () => { _dingSub = k; paint(); }
       }, l));
     });
     body.appendChild(subBar);
     body.appendChild(pane);
-    if (dSub === 'log') { paintNotifyLogTab(pane); return; }
+    if (_dingSub === 'log') { paintNotifyLogTab(pane); return; }
 
     let allRows = [];
     const countBar = h('div', { class: 'dg-counts' });
@@ -2663,7 +2655,7 @@ function pageAdmin() {
       phone: inputNode({ value: u.phone || '' })
     };
     const deptSel = selectNode(state.departments.map(d => ({ v: d, t: d })), u.dept);
-    let committee = !!u.committee, admin = !!u.admin;
+    let committee = !!u.committee, admin = !!u.admin, noNotify = !!u.noNotify;
     const permBox = h('div');
     function paintPerm() {
       clear(permBox);
@@ -2674,6 +2666,10 @@ function pageAdmin() {
       permBox.appendChild(h('label', { class: 'switch', style: { marginTop: '8px' } }, [
         (() => { const i = h('input', { type: 'checkbox' }); i.checked = admin; i.addEventListener('change', () => { admin = i.checked; paintPerm(); }); return i; })(),
         h('span', { text: '管理员（可进管理员后台管理门店 / 分区 / 部门 / 账号，并维护通讯录）' })
+      ]));
+      permBox.appendChild(h('label', { class: 'switch', style: { marginTop: '8px' } }, [
+        (() => { const i = h('input', { type: 'checkbox' }); i.checked = noNotify; i.addEventListener('change', () => { noNotify = i.checked; paintPerm(); }); return i; })(),
+        h('span', { text: '不接收钉钉提醒（站内消息照常，仍可钉钉登录）' })
       ]));
     }
     paintPerm();
@@ -2705,7 +2701,7 @@ function pageAdmin() {
             const patch = {
               name: ref.name.value.trim(), dept: deptSel.value, title: ref.title.value.trim(), phone: ref.phone.value.trim(),
               account, pwd: ref.pwd.value.trim(),
-              committee: committee, admin: admin
+              committee: committee, admin: admin, noNotify: noNotify
             };
             try {
               if (isNew) { await addHqUser(Object.assign({ duty: '' }, patch)); toast('账号已创建：' + account, 'ok'); }

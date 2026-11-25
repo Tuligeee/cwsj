@@ -83,6 +83,12 @@ function isDefaultPwd(plain) {
   return plain === (require('./db').DEFAULT_STORE_PWD) || plain === '123456';
 }
 
+/* ---------------- 钉钉登录（2026-11-24） ----------------
+   只换"拿 token 的方式"，登录后的会话与权限判定完全复用 /api/login 那套。
+   回调只认域名（DING_LOGIN_BASE），IP 直连不可用。
+   ticket 5 分钟、token 不进 URL。路由集中写在 src/ding_login.js，便于单测。 */
+require('./ding_login').mount(app, { sign, log });
+
 /* ---------------- 拉取全量数据 ---------------- */
 /* 按角色裁剪提需（2026-10-29）：门店只看本店；普通总部只看到派给自己的；
    管委会/管理员看全部。注意：PUT 时必须合并回去，见下方 scopeMerge。 */
@@ -95,6 +101,14 @@ function trimDemands(actor, all) {
 
 /* 隐私任务的可见性判定与脱敏：规则与实现都在 src/privacy.js（纯函数，有单测） */
 const { canSeeTask, redactTask, stripRecord } = require('./privacy');
+
+/* 「职务」写 boss 就是老板：不显示在通讯录、也不收钉钉提醒。
+   2026-11-25 用户定：部门保持原样（管委会），只靠职务这个字段标记。 */
+function isBoss(u) {
+  if (!u) return false;
+  if (u.hiddenContacts) return true;
+  return String(u.title || '').trim().toLowerCase() === 'boss';
+}
 
 app.get('/api/bootstrap', requireAuth, (req, res) => {
   const st = getState();
@@ -121,6 +135,13 @@ app.get('/api/bootstrap', requireAuth, (req, res) => {
     return r;
   });
   const state = Object.assign({}, base, { demands: visible, tasks: tasks, records: records });
+  /* boss 不进通讯录：不管历史残留还是别处写进来的，返回前统一剔掉 */
+  const bossIds = new Set(
+    [].concat(base.hq || [], base.stores || []).filter(isBoss).map(u => u.id)
+  );
+  if (bossIds.size) {
+    state.contacts = (base.contacts || []).filter(c => !(c.refId && bossIds.has(c.refId)));
+  }
   res.json({ ok: true, version: st.version, updatedAt: st.updatedAt, state: state, me: req.actor });
 });
 
@@ -374,6 +395,26 @@ app.post('/api/ding/bind', requireAuth, (req, res) => {
   res.json({ ok: true, dingName: p.name });
 });
 
+/* 批量自动绑定：把「账号就是手机号、但还没绑钉钉」的账号一次性补上（仅管理员） */
+app.post('/api/ding/autobind', requireAuth, async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const rows = db.prepare('SELECT u.id, u.account, u.name FROM users u '
+    + 'LEFT JOIN ding_map m ON m.user_id = u.id WHERE m.user_id IS NULL').all()
+    .filter(r => /^1\d{10}$/.test(String(r.account || '')));
+  const bound = [], skipped = [];
+  for (const r of rows) {
+    try {
+      const x = await require('./ding_login').bindByMobile(r.id, r.account);
+      if (x.ok) bound.push({ id: r.id, name: r.name, ding: x.dingName || x.dingUserid });
+      else skipped.push({ id: r.id, name: r.name, reason: x.reason });
+    } catch (e) {
+      skipped.push({ id: r.id, name: r.name, reason: e.message });
+    }
+  }
+  log(req.actor.id, 'ding.autobind.batch', bound.length + '/' + rows.length);
+  res.json({ ok: true, total: rows.length, bound, skipped });
+});
+
 app.post('/api/ding/test', requireAuth, async (req, res) => {
   if (!adminOnly(req, res)) return;
   const userId = String((req.body || {}).userId || '');
@@ -619,6 +660,8 @@ function removeAutoContact(state, refId) {
 }
 function syncContact(state, type, row) {
   if (!Array.isArray(state.contacts)) state.contacts = [];
+  /* 标记为「不在通讯录显示」的账号（boss 部门或 hiddenContacts）：撤掉自动联系人，改账号也不会再冒出来 */
+  if (row && isBoss(row)) { removeAutoContact(state, row.id); return; }
   const fresh = contactFromAccount(type, row);
   /* 门店没填店长（或账号被清空）→ 撤掉自动联系人，别留一条空壳 */
   if (!fresh) { removeAutoContact(state, row && row.id); return; }
@@ -696,6 +739,16 @@ function saveAccount(actor, kind, mode, id, patch) {
           .run(id, type, account, bcrypt.hashSync(pwdPlain || DEFAULT_STORE_PWD, 10), name, enabled ? 1 : 0, JSON.stringify(row));
       }
     }
+  }
+
+  /* 账号本身就是手机号 → 顺手按手机号绑钉钉（异步，失败不影响建账号）。
+     注意 account 是上面「新增/编辑」分支里的局部变量，这里必须从 patch 重新取，
+     否则删除分支或作用域外会 ReferenceError（2026-11-25 踩过，保存账号直接 500）。 */
+  const autoAcc = mode === 'delete' ? '' : String((patch && patch.account) || '').trim();
+  if (/^1\d{10}$/.test(autoAcc)) {
+    require('./ding_login').bindByMobile(id, autoAcc)
+      .then(r => log(id, 'ding.autobind', r.ok ? (r.dingName + ' ' + r.dingUserid) : r.reason))
+      .catch(e => log(id, 'ding.autobind.fail', e.message));
   }
 
   /* state 改了必须推进版本号，否则前端下次 PUT 会撞 409 */

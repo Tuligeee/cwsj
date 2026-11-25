@@ -91,6 +91,30 @@ function atTime(dateStr, timeStr) {
   return new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0);
 }
 
+/* ---------- 生效开始日期（纯函数，单元测试直接覆盖） ----------
+   新建周期任务时，若本期该日子已经过去，就把生效日顺延到下一个周期起点，
+   免得「刚发布就逾期」；**编辑已下发任务时绝不顺延** ——
+   2026-11-25 踩过：每月 20 日的月任务在 25 号被改了一次门店，
+   生效日被悄悄推到次月 1 日，本月整期作废：总部看到全部门店「不适用」、进度 0/0，
+   门店那边任务掉进「待生效」，连提醒都不发。 */
+function resolveStartDate(opt) {
+  const o = opt || {};
+  const sd = o.startDate || ymd(new Date());
+  if (o.isEdit) return sd;                       /* 编辑：以表单里的生效日为准，不动 */
+  const now = o.now ? new Date(o.now) : new Date();
+  if (o.cycle === 'monthly') {
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const day = Math.min(Number(o.monthDay) || 1, last);
+    if (day < now.getDate()) return ymd(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+  }
+  if (o.cycle === 'weekly') {
+    const wd = Number(o.weekday) || 7;            /* 1=周一 … 7=周日 */
+    const curWd = now.getDay() === 0 ? 7 : now.getDay();
+    if (wd < curWd) return ymd(addDays(startOfDay(now), 7 - curWd + wd));
+  }
+  return sd;
+}
+
 /** 相对时间：3分钟前 / 2小时前 / 昨天 14:20 / 2026-10-01 */
 function ago(d, now) {
   const t = new Date(d).getTime();

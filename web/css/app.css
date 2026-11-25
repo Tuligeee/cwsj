@@ -60,7 +60,7 @@ a{color:var(--brand); text-decoration:none;}
 }
 .login-card{
   width:1120px; max-width:100%; background:var(--panel); border-radius:20px;
-  box-shadow:var(--shadow-lg); display:grid; grid-template-columns:400px 1fr; overflow:hidden;
+  box-shadow:var(--shadow-lg); display:grid; grid-template-columns:360px 1fr; overflow:hidden;
   border:1px solid var(--line);
 }
 .login-left{
@@ -2575,3 +2575,41 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   .verdict-actions .va-hint{width:100%;margin-left:0;}
   .btn-verdict{height:32px;padding:0 14px;}
 }
+
+/* ---------- 登录页：其他方式登录（2026-11-25） ---------- */
+.login-alt{margin-top:18px;}
+.login-alt-title{font-size:12px;color:var(--text-3);margin-bottom:10px;}
+.login-alt-icon{width:40px;height:40px;border:0;background:transparent;padding:0;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s;}
+.login-alt-icon:hover{transform:scale(1.06);}
+.login-alt-icon:focus{outline:none;}
+.login-alt-icon:focus-visible{outline:2px solid #1677FF;outline-offset:3px;}
+.ding-mark{width:26px;height:26px;border-radius:8px;background:#1677FF;display:flex;align-items:center;justify-content:center;line-height:0;}
+.ding-qr{display:flex;align-items:center;justify-content:center;padding:10px 0 4px;min-height:228px;}
+.ding-qr img,.ding-qr canvas{border-radius:6px;}
+
+/* ---------- 登录页：左侧扫码面板（2026-11-25） ---------- */
+.login-qr-panel{padding:44px 26px;display:flex;flex-direction:column;align-items:center;text-align:center;
+  border-right:1px solid var(--line);background:var(--panel);}
+.lqp-brand{display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:30px;}
+.lqp-logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(150deg,#4F6BED,#8B4FE0);
+  color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:16px;}
+.lqp-brand b{font-size:15px;letter-spacing:.3px;}
+.lqp-title{font-size:14px;color:var(--text-2);margin-bottom:14px;text-align:center;}
+.lqp-qr{position:relative;width:190px;height:190px;display:flex;align-items:center;justify-content:center;
+  background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.lqp-qr img,.lqp-qr canvas{display:block;}
+.lqp-alt{margin-top:auto;padding-top:26px;text-align:center;}
+.login-alt-inline{display:none;}
+@media (max-width:1180px){
+  .login-qr-panel{display:none;}
+  .login-alt-inline{display:block;}
+}
+
+/* 扫码状态遮罩：扫描成功 / 登录中 / 过期 */
+.qr-mask{position:absolute;inset:0;background:rgba(255,255,255,.95);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:8px;padding:12px;text-align:center;}
+.qr-mask.hidden{display:none;}
+.qr-mask-t{font-size:30px;font-weight:700;color:#1677FF;line-height:1;}
+.qr-mask-s{font-size:12.5px;color:var(--text-2);line-height:1.5;}
+.qr-mask.err .qr-mask-t{color:#F54A45;}

@@ -439,6 +439,156 @@ function jumpTo(o) {
   }
 }
 
+/* 钉钉内免登：在工作台/消息里点开网页应用时自动拿身份，不用输密码。
+   依赖服务端 /api/auth/ding/jsapi 给的 dd.config 签名。 */
+function inDingTalk() { return /DingTalk/i.test(navigator.userAgent); }
+
+function loadJsapi() {
+  return new Promise((resolve, reject) => {
+    if (window.dd && window.dd.runtime) return resolve(window.dd);
+    const s = document.createElement('script');
+    s.src = 'https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js';
+    s.onload = () => resolve(window.dd);
+    s.onerror = () => reject(new Error('钉钉 JSAPI 加载失败'));
+    document.head.appendChild(s);
+  });
+}
+
+async function tryDingAutoLogin() {
+  if (!inDingTalk()) return false;
+  try {
+    const dd = await loadJsapi();
+    if (!dd || !dd.runtime) return false;
+    /* 钉钉从工作台打开网页应用时，URL 上可能带 corpId —— 有就直接用，省得配环境变量 */
+    const qsCorp = new URLSearchParams(location.search).get('corpid') || new URLSearchParams(location.search).get('corpId') || '';
+    const cfg = await fetch(Api.base + '/api/auth/ding/jsapi?url='
+      + encodeURIComponent(location.href.split('#')[0])
+      + (qsCorp ? '&corpId=' + encodeURIComponent(qsCorp) : ''))
+      .then(r => r.json());
+    if (!cfg || !cfg.ok) throw new Error((cfg && cfg.msg) || '免登配置失败');
+    await new Promise((resolve, reject) => {
+      dd.config({
+        agentId: cfg.agentId, corpId: cfg.corpId, timeStamp: cfg.timeStamp,
+        nonceStr: cfg.nonceStr, signature: cfg.signature,
+        jsApiList: ['runtime.permission.requestAuthCode'],
+      });
+      dd.error(err => reject(new Error((err && err.errorMessage) || '钉钉鉴权失败')));
+      dd.ready(resolve);
+      setTimeout(resolve, 3000);
+    });
+    const code = await new Promise((resolve, reject) => {
+      dd.runtime.permission.requestAuthCode({
+        corpId: cfg.corpId,
+        onSuccess: (info) => resolve(info.code),
+        onFail: (err) => reject(new Error((err && err.errorMessage) || '拿免登码失败')),
+      });
+    });
+    const r = await fetch(Api.base + '/api/auth/ding/h5', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+    }).then(x => x.json());
+    if (r && r.ok) { Api.setToken(r.token); await afterLogin(r.user); return true; }
+    if (r && r.code === 'NEED_PICK') { openDingPick(r.ticket, r.candidates || []); return false; }
+    dingLoginError = (r && r.msg) || '钉钉免登失败';
+  } catch (e) {
+    dingLoginError = e.message;
+  }
+  return false;
+}
+
+/* ---------------- 钉钉登录回跳 ---------------- */
+/* 回调只带一次性 ticket（5 分钟），token 不进 URL。
+   密码登录和钉钉登录共用同一套收尾，避免两处各写一遍再漂移。 */
+let dingLoginError = '';
+
+function cleanDingQuery() {
+  try {
+    const u = new URL(location.href);
+    ['ding', 'ding_err', 'pick'].forEach(k => u.searchParams.delete(k));
+    history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+  } catch (_) {}
+}
+
+async function afterLogin(user, mustChangePwd) {
+  currentRoute = null;
+  if (window.__SERVER_MODE) {
+    const b = await Api.bootstrap();
+    window.__BOOT_STATE = b.state;
+    window.__BOOT_ME = b.me;
+    loadState();
+    /* 关键：把 me 设上。钉钉回跳时 boot 会提前 return，不走 restoreSession，
+       me 还是 null → renderSideFoot 抛错 → 页面只剩壳子，得手动刷新才正常（2026-11-25 踩过） */
+    restoreSession();
+  }
+  /* 钉钉回跳路径没经过 boot 的 bindTopbar，这里补一次（只补一次，避免重复绑事件） */
+  if (!window.__topbarBound) { try { bindTopbar(); window.__topbarBound = true; } catch (_) {} }
+  renderApp();
+  setTimeout(applyDeepLink, 400);
+  toast('欢迎回来，' + ((user && user.name) || ''), 'ok');
+  if (mustChangePwd) setTimeout(() => toast('当前仍是初始密码，建议尽快修改', 'err'), 1500);
+}
+
+function openDingPick(ticket, cands) {
+  const inst = openModal({
+    title: '选择身份',
+    sub: '这个钉钉号绑定了多个账号',
+    narrow: true,
+    body: h('div', {}, cands.map(c => h('button', {
+      class: 'btn', style: { width: '100%', justifyContent: 'space-between', marginBottom: '8px' },
+      onclick: async () => {
+        try {
+          const r = await Api.dingPick(ticket, c.id);
+          if (!r || !r.ok) { toast((r && r.msg) || '进入失败', 'err'); return; }
+          inst.close();
+          await afterLogin(r.user);
+        } catch (e) { toast(e.message, 'err'); }
+      }
+    }, [h('span', {}, c.name), h('span', { class: 'fhint', style: { margin: 0 } }, c.account)]))),
+  });
+}
+
+/* 返回 true 表示已经登录并进主界面了，boot 不用再走一遍 */
+async function handleDingReturn() {
+  const qs = new URLSearchParams(location.search);
+  const errMsg = qs.get('ding_err');
+  if (errMsg) { dingLoginError = errMsg; cleanDingQuery(); return false; }
+  const ticket = qs.get('ding');
+  if (!ticket) return false;
+  cleanDingQuery();
+  try {
+    const r = await Api.dingToken(ticket);
+    if (r && r.ok) { await afterLogin(r.user); return true; }
+    if (r && r.code === 'NEED_PICK') { openDingPick(ticket, r.candidates || []); return false; }
+    dingLoginError = (r && r.msg) || '钉钉登录失败';
+  } catch (e) { dingLoginError = e.message; }
+  return false;
+}
+
+/* 钉钉官方飞鸟标（Ant Design 的 dingtalk 图形），白鸟 + 品牌蓝底 */
+const DING_PATH = 'M573.7 252.5C422.5 197.4 201.3 96.7 201.3 96.7c-15.7-4.1-17.9 11.1-17.9 11.1c-5 61.1 33.6 160.5 53.6 182.8c19.9 22.3 319.1 113.7 319.1 113.7S326 357.9 270.5 341.9c-55.6-16-37.9 17.8-37.9 17.8c11.4 61.7 64.9 131.8 107.2 138.4c42.2 6.6 220.1 4 220.1 4s-35.5 4.1-93.2 11.9c-42.7 5.8-97 12.5-111.1 17.8c-33.1 12.5 24 62.6 24 62.6c84.7 76.8 129.7 50.5 129.7 50.5c33.3-10.7 61.4-18.5 85.2-24.2L565 743.1h84.6L603 928l205.3-271.9H700.8l22.3-38.7c.3.5.4.8.4.8S799.8 496.1 829 433.8l.6-1h-.1c5-10.8 8.6-19.7 10-25.8c17-71.3-114.5-99.4-265.8-154.5';
+function dingMark() {
+  /* 用 innerHTML 注入：h() 是 createElement，直接建 <svg> 会落到 HTML 命名空间，path 不渲染 */
+  return h('span', {
+    class: 'ding-mark', 'aria-hidden': 'true',
+    html: '<svg viewBox="0 0 1024 1024" width="21" height="21"><path fill="#fff" d="' + DING_PATH + '"/></svg>',
+  });
+}
+
+/* 点钉钉图标：在钉钉里直接授权；在浏览器里弹二维码扫码 */
+function openDingLogin() {
+  if (inDingTalk()) { Api.dingStart(); return; }
+  const box = h('div', { class: 'ding-qr' });
+  const inst = openModal({ title: '钉钉扫码登录', sub: '用手机钉钉扫一扫', narrow: true, body: box });
+  fetch(Api.base + '/api/auth/ding/start-url')
+    .then(r => r.json())
+    .then(j => {
+      if (!j || !j.ok) { box.appendChild(h('div', { class: 'fhint' }, (j && j.msg) || '二维码生成失败')); return; }
+      if (!window.QRCode) { box.appendChild(h('div', { class: 'fhint' }, '二维码组件没加载，刷新页面重试')); return; }
+      new QRCode(box, { text: j.url, width: 208, height: 208, correctLevel: QRCode.CorrectLevel.M });
+    })
+    .catch(e => box.appendChild(h('div', { class: 'fhint' }, '网络错误：' + e.message)));
+  return inst;
+}
+
 /* ---------------- 登录页 ---------------- */
 let loginRole = 'store';
 function renderLogin() {
@@ -450,6 +600,7 @@ function renderLogin() {
   const accInput = inputNode({ placeholder: '请输入账号', autocomplete: 'off' });
   const pwd = h('input', { class: 'input', type: 'password', placeholder: '请输入密码', value: '' });
   const err = h('div', { class: 'login-err' });
+  if (dingLoginError) { err.textContent = dingLoginError; dingLoginError = ''; }
 
   function fillAcc(account) {
     accInput.value = account;
@@ -471,39 +622,31 @@ function renderLogin() {
     const r = await login(accInput.value, pwd.value);
     if (!r.ok) { err.textContent = r.msg; return; }
     err.textContent = '';
-    currentRoute = null;
-    /* 服务端模式：登录成功后拉一次全量数据 */
-    if (window.__SERVER_MODE) {
-      try {
-        const b = await Api.bootstrap();
-        window.__BOOT_STATE = b.state;
-        window.__BOOT_ME = b.me;
-        loadState();
-      } catch (e) {
-        err.textContent = '加载数据失败：' + e.message;
-        return;
-      }
+    try {
+      await afterLogin(r.user, r.mustChangePwd);
+    } catch (e) {
+      err.textContent = '加载数据失败：' + e.message;
     }
-    renderApp();
-    setTimeout(applyDeepLink, 400);
-    toast('欢迎回来，' + r.user.name, 'ok');
-    if (r.mustChangePwd) setTimeout(() => toast('当前仍是初始密码，建议尽快修改', 'err'), 1500);
   }
   pwd.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   accInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwd.focus(); });
 
   const card = h('div', { class: 'login-card' }, [
-    h('div', { class: 'login-left' }, [
-      h('div', { class: 'login-logo' }, '纯'),
-      h('h2', {}, '纯玩世界'),
-      h('p', {}, '连锁门店任务管理平台 · 门店与管理公司协同工作台'),
-      h('div', { class: 'login-feats' }, [
-        h('div', { class: 'login-feat' }, [h('i', {}, '1'), h('span', {}, '每日 / 每周 / 每月必做任务一次设定长期循环，专项任务执行完即停')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '2'), h('span', {}, '任务与需求均支持文字 + 图片 + 链接，凭证留痕可追溯')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '3'), h('span', {}, '临期自动标黄、逾期标红，到期前与过期后双重提醒')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '4'), h('span', {}, '门店提需 → 管委会评估 → 派发责任人 → 门店确认，全程留痕')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '5'), h('span', {}, '门店完成情况与管理公司需求处理数据自动汇总，直接用于考核')])
-      ])
+    /* 左：钉钉扫码（电脑端主入口）；右：账号密码。窄屏隐藏左边，图标挪到表单下面 */
+    h('div', { class: 'login-qr-panel' }, [
+      h('div', { class: 'lqp-brand' }, [
+        h('span', { class: 'lqp-logo' }, '纯'),
+        h('b', {}, '纯玩世界'),
+      ]),
+      h('div', { class: 'lqp-title' }, '钉钉扫码登录'),
+      h('div', { class: 'lqp-qr', id: 'login-qr' }),
+      h('div', { class: 'lqp-alt' }, [
+        h('div', { class: 'login-alt-title' }, '其他方式登录'),
+        h('button', {
+          class: 'login-alt-icon', type: 'button', title: '钉钉登录', 'aria-label': '钉钉登录',
+          onclick: () => Api.dingStart(),
+        }, [dingMark()]),
+      ]),
     ]),
     h('div', { class: 'login-right' }, [
       h('h3', {}, '登录'),
@@ -512,6 +655,13 @@ function renderLogin() {
       h('div', { class: 'field' }, [h('label', {}, '密码'), pwd]),
       err,
       h('button', { class: 'btn btn-primary', style: { width: '100%', justifyContent: 'center', padding: '10px' }, onclick: doLogin }, '登录'),
+      h('div', { class: 'login-alt login-alt-inline' }, [
+        h('div', { class: 'login-alt-title' }, '其他方式登录'),
+        h('button', {
+          class: 'login-alt-icon', type: 'button', title: '钉钉登录', 'aria-label': '钉钉登录',
+          onclick: () => Api.dingStart(),
+        }, [dingMark()]),
+      ]),
       h('div', { class: 'login-hint' }, [
         h('div', { class: 'ht' }, '账号或密码忘记了，请联系管理公司管理员重置'),
         accBox
@@ -519,6 +669,55 @@ function renderLogin() {
     ])
   ]);
   wrap.appendChild(card);
+  paintLoginQr();
+}
+
+/* 登录页左侧二维码：码里是「手机打开就免登」的落地页，电脑轮询状态，
+   手机确认后这台电脑自动登录（2026-11-25：钉钉没给扫码登录通道，自己实现） */
+function paintLoginQr() {
+  const box = document.getElementById('login-qr');
+  if (!box) return;
+  if (inDingTalk()) { box.appendChild(h('div', { class: 'fhint' }, '钉钉内可直接进入')); return; }
+
+  const maskTitle = h('div', { class: 'qr-mask-t' });
+  const maskSub = h('div', { class: 'qr-mask-s' });
+  const mask = h('div', { class: 'qr-mask hidden' }, [maskTitle, maskSub]);
+  const showMask = (t, s, cls) => { maskTitle.textContent = t; maskSub.textContent = s || ''; mask.className = 'qr-mask' + (cls ? ' ' + cls : ''); };
+
+  fetch(Api.base + '/api/auth/ding/qr')
+    .then(r => r.json())
+    .then(j => {
+      if (!j || !j.ok) { box.appendChild(h('div', { class: 'fhint' }, '二维码暂不可用')); return; }
+      if (!window.QRCode) { box.appendChild(h('div', { class: 'fhint' }, '二维码组件没加载')); return; }
+      new QRCode(box, { text: j.url, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M });
+      box.appendChild(mask);
+
+      let stop = false;
+      const tick = async () => {
+        if (stop) return;
+        try {
+          const s = await fetch(Api.base + '/api/auth/ding/qr/status?t=' + encodeURIComponent(j.token)).then(x => x.json());
+          if (s.status === 'scanned') {
+            showMask('✓', '扫描成功，请在手机上确认', 'ok');
+          } else if (s.status === 'approved') {
+            stop = true;
+            showMask('✓', '登录中…', 'ok');
+            const r = await Api.dingToken(s.ticket);
+            if (r && r.ok) { await afterLogin(r.user); return; }
+            if (r && r.code === 'NEED_PICK') { openDingPick(s.ticket, r.candidates || []); return; }
+            showMask('!', (r && r.msg) || '登录失败', 'err');
+            return;
+          } else if (s.status === 'failed') {
+            stop = true; showMask('!', s.msg || '登录失败', 'err'); return;
+          } else if (s.status === 'expired') {
+            stop = true; showMask('!', '二维码已过期', 'err'); return;
+          }
+        } catch (e) { /* 网络抖动忽略，下一轮再试 */ }
+        if (!stop) setTimeout(tick, 1500);
+      };
+      setTimeout(tick, 1200);
+    })
+    .catch(() => box.appendChild(h('div', { class: 'fhint' }, '二维码暂不可用')));
 }
 
 /* ---------------- 修改密码 ---------------- */
@@ -612,6 +811,9 @@ async function boot() {
   /* 本构建始终走服务端模式（本地单机演示请用桌面原版） */
   window.__SERVER_MODE = true;
 
+  /* 钉钉登录回跳：已经登录并渲染完，后面的初始化不用再走一遍 */
+  if (await handleDingReturn()) return;
+
   /* 有 token 就先换数据；token 失效会自动落到登录页 */
   if (Api.getToken()) {
     try {
@@ -623,8 +825,12 @@ async function boot() {
     }
   }
 
+  /* 没 token 且在钉钉里打开 → 先试免登，成功就直接进主界面 */
+  if (!Api.getToken() && await tryDingAutoLogin()) return;
+
   loadState();
   bindTopbar();
+  window.__topbarBound = true;
   if (restoreSession()) { renderApp(); setTimeout(applyDeepLink, 700); }
   else renderLogin();
   setInterval(() => { if (me) refreshBell(); }, 60000);

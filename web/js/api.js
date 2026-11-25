@@ -85,6 +85,20 @@
       return r;
     },
 
+    /* ---- 钉钉登录（2026-11-24）----
+       回调页只带回一次性 ticket，token 在浏览器里换，绝不放进 URL */
+    dingStart() { location.href = BASE + '/api/auth/ding/start'; },
+    async dingToken(ticket) {
+      const r = await request('POST', '/api/auth/ding/token', { ticket });
+      if (r && r.token) { setToken(r.token); version = 0; }
+      return r;
+    },
+    async dingPick(ticket, userId) {
+      const r = await request('POST', '/api/auth/ding/pick', { ticket, userId });
+      if (r && r.token) { setToken(r.token); version = 0; }
+      return r;
+    },
+
     async bootstrap() {
       const r = await request('GET', '/api/bootstrap');
       version = r.version;
