@@ -274,6 +274,31 @@ async function h5CodeToUserid(code) {
   return j.result.userid;
 }
 
+/* ---------- 按手机号自动绑定 ----------
+   建账号时如果账号就是手机号（1 开头 11 位），直接查钉钉通讯录绑上，
+   省掉管理员再去「钉钉提醒 → 账号绑定」里手点一遍。查不到就静默跳过。 */
+async function bindByMobile(userId, mobile) {
+  const m = String(mobile || '').trim();
+  if (!/^1\d{10}$/.test(m)) return { ok: false, reason: '不是手机号' };
+  const tok = await ding.getToken();
+  const j = await fetch(OAPI + '/topapi/v2/user/getbymobile?access_token=' + encodeURIComponent(tok), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mobile: m }),
+  }).then(x => x.json()).catch(() => ({}));
+  if (j.errcode !== 0 || !j.result || !j.result.userid) {
+    return { ok: false, reason: '钉钉通讯录里查不到这个手机号（' + (j.errmsg || j.errcode) + '）' };
+  }
+  const dingUserid = j.result.userid;
+  const p = db.prepare('SELECT name FROM ding_people WHERE userid = ?').get(dingUserid);
+  const dingName = (p && p.name) || '';
+  db.prepare('INSERT INTO ding_map (user_id, ding_userid, ding_name, source, updated_by, updated_at) '
+    + 'VALUES (?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET ding_userid=excluded.ding_userid, '
+    + 'ding_name=excluded.ding_name, source=excluded.source, updated_by=excluded.updated_by, updated_at=excluded.updated_at')
+    .run(userId, dingUserid, dingName, 'auto-mobile', 'system', new Date().toISOString());
+  return { ok: true, dingUserid, dingName };
+}
+
 /* ---------- 路由挂载（server.js 和单测共用同一份） ---------- */
 function mount(app, deps) {
   const sign = deps.sign;
@@ -358,5 +383,5 @@ function mount(app, deps) {
 }
 
 module.exports = {
-  mount, ensureSchema, startUrl, callback, exchange, candidatesOf, publicUser, readTicket, MOCK, BASE,
+  mount, ensureSchema, startUrl, callback, exchange, candidatesOf, publicUser, readTicket, bindByMobile, MOCK, BASE,
 };

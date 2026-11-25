@@ -380,6 +380,26 @@ app.post('/api/ding/bind', requireAuth, (req, res) => {
   res.json({ ok: true, dingName: p.name });
 });
 
+/* 批量自动绑定：把「账号就是手机号、但还没绑钉钉」的账号一次性补上（仅管理员） */
+app.post('/api/ding/autobind', requireAuth, async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const rows = db.prepare('SELECT u.id, u.account, u.name FROM users u '
+    + 'LEFT JOIN ding_map m ON m.user_id = u.id WHERE m.user_id IS NULL').all()
+    .filter(r => /^1\d{10}$/.test(String(r.account || '')));
+  const bound = [], skipped = [];
+  for (const r of rows) {
+    try {
+      const x = await require('./ding_login').bindByMobile(r.id, r.account);
+      if (x.ok) bound.push({ id: r.id, name: r.name, ding: x.dingName || x.dingUserid });
+      else skipped.push({ id: r.id, name: r.name, reason: x.reason });
+    } catch (e) {
+      skipped.push({ id: r.id, name: r.name, reason: e.message });
+    }
+  }
+  log(req.actor.id, 'ding.autobind.batch', bound.length + '/' + rows.length);
+  res.json({ ok: true, total: rows.length, bound, skipped });
+});
+
 app.post('/api/ding/test', requireAuth, async (req, res) => {
   if (!adminOnly(req, res)) return;
   const userId = String((req.body || {}).userId || '');
@@ -702,6 +722,13 @@ function saveAccount(actor, kind, mode, id, patch) {
           .run(id, type, account, bcrypt.hashSync(pwdPlain || DEFAULT_STORE_PWD, 10), name, enabled ? 1 : 0, JSON.stringify(row));
       }
     }
+  }
+
+  /* 账号本身就是手机号 → 顺手按手机号绑钉钉（异步，失败不影响建账号） */
+  if (/^1\d{10}$/.test(account)) {
+    require('./ding_login').bindByMobile(id, account)
+      .then(r => log(id, 'ding.autobind', r.ok ? (r.dingName + ' ' + r.dingUserid) : r.reason))
+      .catch(e => log(id, 'ding.autobind.fail', e.message));
   }
 
   /* state 改了必须推进版本号，否则前端下次 PUT 会撞 409 */
