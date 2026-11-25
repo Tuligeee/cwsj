@@ -558,6 +558,27 @@ async function handleDingReturn() {
   return false;
 }
 
+/* 钉钉图标：品牌蓝底 + 白字，和登录页左侧「纯」方块同一套视觉 */
+function dingMark() {
+  return h('span', { class: 'ding-mark', 'aria-hidden': 'true' }, '钉');
+}
+
+/* 点钉钉图标：在钉钉里直接授权；在浏览器里弹二维码扫码 */
+function openDingLogin() {
+  if (inDingTalk()) { Api.dingStart(); return; }
+  const box = h('div', { class: 'ding-qr' });
+  const inst = openModal({ title: '钉钉扫码登录', sub: '用手机钉钉扫一扫', narrow: true, body: box });
+  fetch(Api.base + '/api/auth/ding/start-url')
+    .then(r => r.json())
+    .then(j => {
+      if (!j || !j.ok) { box.appendChild(h('div', { class: 'fhint' }, (j && j.msg) || '二维码生成失败')); return; }
+      if (!window.QRCode) { box.appendChild(h('div', { class: 'fhint' }, '二维码组件没加载，刷新页面重试')); return; }
+      new QRCode(box, { text: j.url, width: 208, height: 208, correctLevel: QRCode.CorrectLevel.M });
+    })
+    .catch(e => box.appendChild(h('div', { class: 'fhint' }, '网络错误：' + e.message)));
+  return inst;
+}
+
 /* ---------------- 登录页 ---------------- */
 let loginRole = 'store';
 function renderLogin() {
@@ -620,10 +641,13 @@ function renderLogin() {
       h('div', { class: 'field' }, [h('label', {}, '密码'), pwd]),
       err,
       h('button', { class: 'btn btn-primary', style: { width: '100%', justifyContent: 'center', padding: '10px' }, onclick: doLogin }, '登录'),
-      h('button', {
-        class: 'btn', style: { width: '100%', justifyContent: 'center', padding: '10px', marginTop: '8px' },
-        onclick: () => Api.dingStart()
-      }, '钉钉登录'),
+      h('div', { class: 'login-alt' }, [
+        h('div', { class: 'login-alt-title' }, '其他方式登录'),
+        h('button', {
+          class: 'login-alt-icon', type: 'button', title: '钉钉登录', 'aria-label': '钉钉登录',
+          onclick: () => openDingLogin(),
+        }, [dingMark()]),
+      ]),
       h('div', { class: 'login-hint' }, [
         h('div', { class: 'ht' }, '账号或密码忘记了，请联系管理公司管理员重置'),
         accBox

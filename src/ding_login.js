@@ -345,6 +345,15 @@ function mount(app, deps) {
     }
   });
 
+  /* 给登录页的二维码用：返回授权地址而不是 302，前端自己渲染成二维码 */
+  app.get('/api/auth/ding/start-url', (req, res) => {
+    try {
+      res.json({ ok: true, url: startUrl() });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
   app.get('/api/auth/ding/callback', callback);
 
   /* 登录页用 ticket 换 token。一个钉钉号绑了多个账号时返回 NEED_PICK + 候选身份。 */
