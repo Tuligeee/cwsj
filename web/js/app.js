@@ -515,7 +515,12 @@ async function afterLogin(user, mustChangePwd) {
     window.__BOOT_STATE = b.state;
     window.__BOOT_ME = b.me;
     loadState();
+    /* 关键：把 me 设上。钉钉回跳时 boot 会提前 return，不走 restoreSession，
+       me 还是 null → renderSideFoot 抛错 → 页面只剩壳子，得手动刷新才正常（2026-11-25 踩过） */
+    restoreSession();
   }
+  /* 钉钉回跳路径没经过 boot 的 bindTopbar，这里补一次（只补一次，避免重复绑事件） */
+  if (!window.__topbarBound) { try { bindTopbar(); window.__topbarBound = true; } catch (_) {} }
   renderApp();
   setTimeout(applyDeepLink, 400);
   toast('欢迎回来，' + ((user && user.name) || ''), 'ok');
@@ -825,6 +830,7 @@ async function boot() {
 
   loadState();
   bindTopbar();
+  window.__topbarBound = true;
   if (restoreSession()) { renderApp(); setTimeout(applyDeepLink, 700); }
   else renderLogin();
   setInterval(() => { if (me) refreshBell(); }, 60000);
