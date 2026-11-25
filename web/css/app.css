@@ -60,7 +60,7 @@ a{color:var(--brand); text-decoration:none;}
 }
 .login-card{
   width:1120px; max-width:100%; background:var(--panel); border-radius:20px;
-  box-shadow:var(--shadow-lg); display:grid; grid-template-columns:400px 1fr; overflow:hidden;
+  box-shadow:var(--shadow-lg); display:grid; grid-template-columns:360px 1fr; overflow:hidden;
   border:1px solid var(--line);
 }
 .login-left{
@@ -2589,17 +2589,17 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 .ding-qr img,.ding-qr canvas{border-radius:6px;}
 
 /* ---------- 登录页：左侧扫码面板（2026-11-25） ---------- */
-.login-qr-panel{padding:44px 34px;display:flex;flex-direction:column;
+.login-qr-panel{padding:44px 26px;display:flex;flex-direction:column;align-items:center;text-align:center;
   border-right:1px solid var(--line);background:var(--panel);}
-.lqp-brand{display:flex;align-items:center;gap:9px;margin-bottom:30px;}
+.lqp-brand{display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:30px;}
 .lqp-logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(150deg,#4F6BED,#8B4FE0);
   color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:16px;}
 .lqp-brand b{font-size:15px;letter-spacing:.3px;}
-.lqp-title{font-size:14px;color:var(--text-2);margin-bottom:14px;}
+.lqp-title{font-size:14px;color:var(--text-2);margin-bottom:14px;text-align:center;}
 .lqp-qr{width:190px;height:190px;display:flex;align-items:center;justify-content:center;
   background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
 .lqp-qr img,.lqp-qr canvas{display:block;}
-.lqp-alt{margin-top:auto;padding-top:26px;}
+.lqp-alt{margin-top:auto;padding-top:26px;text-align:center;}
 .login-alt-inline{display:none;}
 @media (max-width:1180px){
   .login-qr-panel{display:none;}
