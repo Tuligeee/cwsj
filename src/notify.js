@@ -665,6 +665,11 @@ async function flush() {
     }
     const mp = db.prepare('SELECT ding_userid FROM ding_map WHERE user_id = ?').get(r.person_id);
     const h = (S.getState().state.hq || []).find(x => x.id === r.person_id);
+    /* boss 部门 / 显式 noNotify 的人不推钉钉（2026-11-25 用户定），站内消息照常 */
+    if (h && (h.noNotify || String(h.dept || '').trim().toLowerCase() === 'boss')) {
+      db.prepare("UPDATE notify_log SET status='skipped', reason='boss/不接收提醒' WHERE event_key=? AND person_id=?").run(r.event_key, r.person_id);
+      failed++; continue;
+    }
     const dingId = (h && h.dingUserId) || (mp && mp.ding_userid);
     if (!dingId) {
       db.prepare("UPDATE notify_log SET status='skipped', reason='没有钉钉账号' WHERE event_key=? AND person_id=?").run(r.event_key, r.person_id);

@@ -102,6 +102,14 @@ function trimDemands(actor, all) {
 /* 隐私任务的可见性判定与脱敏：规则与实现都在 src/privacy.js（纯函数，有单测） */
 const { canSeeTask, redactTask, stripRecord } = require('./privacy');
 
+/* 「boss」是约定部门名：部门填 boss 的人不显示在通讯录、也不收钉钉提醒。
+   2026-11-25 用户定：只要是 boss 就这样处理，不用单独打标记。 */
+function isBoss(u) {
+  if (!u) return false;
+  if (u.hiddenContacts) return true;
+  return String(u.dept || '').trim().toLowerCase() === 'boss';
+}
+
 app.get('/api/bootstrap', requireAuth, (req, res) => {
   const st = getState();
   if (!st) return res.status(500).json({ ok: false, msg: '数据未初始化' });
@@ -127,6 +135,13 @@ app.get('/api/bootstrap', requireAuth, (req, res) => {
     return r;
   });
   const state = Object.assign({}, base, { demands: visible, tasks: tasks, records: records });
+  /* boss 不进通讯录：不管历史残留还是别处写进来的，返回前统一剔掉 */
+  const bossIds = new Set(
+    [].concat(base.hq || [], base.stores || []).filter(isBoss).map(u => u.id)
+  );
+  if (bossIds.size) {
+    state.contacts = (base.contacts || []).filter(c => !(c.refId && bossIds.has(c.refId)));
+  }
   res.json({ ok: true, version: st.version, updatedAt: st.updatedAt, state: state, me: req.actor });
 });
 
@@ -645,6 +660,8 @@ function removeAutoContact(state, refId) {
 }
 function syncContact(state, type, row) {
   if (!Array.isArray(state.contacts)) state.contacts = [];
+  /* 标记为「不在通讯录显示」的账号（boss 部门或 hiddenContacts）：撤掉自动联系人，改账号也不会再冒出来 */
+  if (row && isBoss(row)) { removeAutoContact(state, row.id); return; }
   const fresh = contactFromAccount(type, row);
   /* 门店没填店长（或账号被清空）→ 撤掉自动联系人，别留一条空壳 */
   if (!fresh) { removeAutoContact(state, row && row.id); return; }
