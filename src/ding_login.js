@@ -156,7 +156,7 @@ function publicUser(row) {
 }
 
 /* ---------- 路由 ---------- */
-function startUrl() {
+function startUrl(stateOverride) {
   if (!BASE) throw new Error('没有配置 DING_LOGIN_BASE（例：https://mancado.cn/cwsj/cwsj-stg）');
   let key;
   try {
@@ -165,7 +165,8 @@ function startUrl() {
     if (!MOCK) throw e;                       // 真跑必须凭据齐全；本地 mock 允许没有 .ding.env
     key = 'mock-app-key';
   }
-  const state = newState();
+  const state = stateOverride || newState();
+  if (stateOverride) states.set(state, Date.now());   // 扫码通道用 'qr:<token>' 当 state
   const redirect = BASE + '/api/auth/ding/callback';
   const q = new URLSearchParams({
     redirect_uri: redirect,
@@ -196,6 +197,27 @@ async function callback(req, res) {
     const { code, state } = req.query;
     if (!code) return fail('钉钉没有返回授权码');
     if (!state || !takeState(state)) return fail('授权已过期，请重新点击钉钉登录');
+
+    /* 扫码通道：state = 'qr:<token>'。手机授权完回写会话，桌面端轮询到就自动登录 */
+    if (String(state).indexOf('qr:') === 0) {
+      const t = String(state).slice(3);
+      const s = getQr(t);
+      if (!s) return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&expired=1');
+      try {
+        const uid = await codeToDingUserid(String(code));
+        const cands2 = candidatesOf(uid);
+        if (!cands2.length) {
+          s.status = 'failed'; s.msg = '这个钉钉号还没绑定平台账号';
+          return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&err=' + encodeURIComponent(s.msg));
+        }
+        s.status = 'approved';
+        s.ticket = issueTicket(uid, cands2);
+        return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&done=1');
+      } catch (e) {
+        s.status = 'failed'; s.msg = e.message || '登录失败';
+        return res.redirect(302, back + '/ding-scan?t=' + encodeURIComponent(t) + '&err=' + encodeURIComponent(s.msg));
+      }
+    }
 
     const dingUserid = await codeToDingUserid(String(code));
     const cands = candidatesOf(dingUserid);
@@ -321,9 +343,12 @@ function getQr(t) {
   return s;
 }
 
-/* 手机端落地页：在钉钉里打开，自动拿免登码并回写 */
-function scanPage(token) {
-  const corp = CORP_ID || cachedCorp();
+/* 手机端落地页：
+   扫码后打开这一页 → 标记「已扫描」→ 直接跳到钉钉授权页（走的是验证过的 OAuth 通道）
+   授权回来落在 /api/auth/ding/callback（state=qr:<token>）→ 回写会话 → 桌面端轮询到就登录。
+   不用 JSAPI 免登：这台应用调 topapi/user/getuserinfo 报「远程服务不存在」。 */
+function scanPage(token, opt) {
+  const o = opt || {};
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -332,42 +357,25 @@ function scanPage(token) {
   html,body{height:100%;margin:0;background:#f5f6fa;font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2329}
   .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;box-sizing:border-box}
   .tick{width:64px;height:64px;border-radius:50%;background:#1677FF;color:#fff;display:flex;align-items:center;justify-content:center;font-size:32px}
+  .tick.bad{background:#F54A45}
   .t{font-size:18px;font-weight:600}
   .s{color:#646a73;font-size:14px}
 </style></head>
 <body><div class="wrap">
   <div class="tick" id="tick">…</div>
-  <div class="t" id="title">正在登录</div>
+  <div class="t" id="title">正在跳转钉钉授权</div>
   <div class="s" id="sub">请稍候</div>
 </div>
-<script src="https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js"></script>
 <script>
 (function () {
   var t = ${JSON.stringify(token)};
-  var corp = ${JSON.stringify(corp)};
+  var done = ${o.done ? 'true' : 'false'};
+  var err = ${JSON.stringify(o.err || '')};
   var $t = document.getElementById('title'), $s = document.getElementById('sub'), $k = document.getElementById('tick');
-  function fail(msg) { $k.textContent = '!'; $k.style.background = '#F54A45'; $t.textContent = '登录失败'; $s.textContent = msg || '请回到电脑刷新重试'; }
+  if (err) { $k.textContent = '!'; $k.className = 'tick bad'; $t.textContent = '登录失败'; $s.textContent = err; return; }
+  if (done) { $k.textContent = '✓'; $t.textContent = '已确认'; $s.textContent = '请在电脑上继续'; return; }
   fetch('api/auth/ding/qr/scanned?t=' + encodeURIComponent(t)).catch(function () {});
-  if (!window.dd || !dd.runtime) { fail('请在钉钉里打开这个页面'); return; }
-  dd.ready(function () {
-    dd.runtime.permission.requestAuthCode({
-      corpId: corp,
-      onSuccess: function (info) {
-        fetch('api/auth/ding/qr/confirm', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ t: t, code: info.code })
-        }).then(function (r) { return r.json(); }).then(function (j) {
-          if (j && j.ok) {
-            $k.textContent = '✓';
-            $t.textContent = '已确认';
-            $s.textContent = '请在电脑上继续';
-          } else { fail((j && j.msg) || '确认失败'); }
-        }).catch(function () { fail('网络错误'); });
-      },
-      onFail: function (e) { fail((e && e.errorMessage) || '未取到免登码'); }
-    });
-  });
-  dd.error(function (e) { fail((e && e.errorMessage) || '钉钉 JSAPI 错误'); });
+  location.replace('api/auth/ding/start?qr=' + encodeURIComponent(t));
 })();
 </script></body></html>`;
 }
@@ -412,6 +420,14 @@ function mount(app, deps) {
 
   app.get('/api/auth/ding/start', (req, res) => {
     try {
+      /* 扫码通道：手机端带着 qr=<token> 来，state 用 qr:<token>，回调时才知道回写给哪个会话 */
+      const qr = String(req.query.qr || '');
+      if (qr) {
+        if (!getQr(qr)) {
+          return res.redirect(302, (BASE || '') + '/ding-scan?t=' + encodeURIComponent(qr) + '&expired=1');
+        }
+        return res.redirect(302, startUrl('qr:' + qr));
+      }
       res.redirect(302, startUrl());
     } catch (e) {
       res.status(500).json({ ok: false, msg: e.message });
@@ -482,7 +498,10 @@ function mount(app, deps) {
       return res.status(410).type('html')
         .send('<meta charset="utf-8"><p style="font:16px sans-serif;padding:24px">二维码已过期，请回到电脑刷新。</p>');
     }
-    res.type('html').send(scanPage(t));
+    res.type('html').send(scanPage(t, {
+      done: req.query.done === '1',
+      err: req.query.err ? String(req.query.err) : (req.query.expired === '1' ? '二维码已过期，请回到电脑刷新' : ''),
+    }));
   });
 
   /* 登录页用 ticket 换 token。一个钉钉号绑了多个账号时返回 NEED_PICK + 候选身份。 */
