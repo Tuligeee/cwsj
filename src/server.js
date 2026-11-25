@@ -102,12 +102,12 @@ function trimDemands(actor, all) {
 /* 隐私任务的可见性判定与脱敏：规则与实现都在 src/privacy.js（纯函数，有单测） */
 const { canSeeTask, redactTask, stripRecord } = require('./privacy');
 
-/* 「boss」是约定部门名：部门填 boss 的人不显示在通讯录、也不收钉钉提醒。
-   2026-11-25 用户定：只要是 boss 就这样处理，不用单独打标记。 */
+/* 「职务」写 boss 就是老板：不显示在通讯录、也不收钉钉提醒。
+   2026-11-25 用户定：部门保持原样（管委会），只靠职务这个字段标记。 */
 function isBoss(u) {
   if (!u) return false;
   if (u.hiddenContacts) return true;
-  return String(u.dept || '').trim().toLowerCase() === 'boss';
+  return String(u.title || '').trim().toLowerCase() === 'boss';
 }
 
 app.get('/api/bootstrap', requireAuth, (req, res) => {
