@@ -741,9 +741,12 @@ function saveAccount(actor, kind, mode, id, patch) {
     }
   }
 
-  /* 账号本身就是手机号 → 顺手按手机号绑钉钉（异步，失败不影响建账号） */
-  if (/^1\d{10}$/.test(account)) {
-    require('./ding_login').bindByMobile(id, account)
+  /* 账号本身就是手机号 → 顺手按手机号绑钉钉（异步，失败不影响建账号）。
+     注意 account 是上面「新增/编辑」分支里的局部变量，这里必须从 patch 重新取，
+     否则删除分支或作用域外会 ReferenceError（2026-11-25 踩过，保存账号直接 500）。 */
+  const autoAcc = mode === 'delete' ? '' : String((patch && patch.account) || '').trim();
+  if (/^1\d{10}$/.test(autoAcc)) {
+    require('./ding_login').bindByMobile(id, autoAcc)
       .then(r => log(id, 'ding.autobind', r.ok ? (r.dingName + ' ' + r.dingUserid) : r.reason))
       .catch(e => log(id, 'ding.autobind.fail', e.message));
   }
