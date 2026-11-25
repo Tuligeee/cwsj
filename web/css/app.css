@@ -2582,6 +2582,7 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
 .login-alt-icon{width:40px;height:40px;border:0;background:transparent;padding:0;border-radius:12px;
   display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s;}
 .login-alt-icon:hover{transform:scale(1.06);}
+.login-alt-icon:focus{outline:none;}
 .login-alt-icon:focus-visible{outline:2px solid #1677FF;outline-offset:3px;}
 .ding-mark{width:26px;height:26px;border-radius:8px;background:#1677FF;display:flex;align-items:center;justify-content:center;line-height:0;}
 .ding-qr{display:flex;align-items:center;justify-content:center;padding:10px 0 4px;min-height:228px;}
