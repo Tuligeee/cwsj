@@ -2584,8 +2584,7 @@ table.tbl th.num, table.tbl td.num { text-align: center; }
   transition:border-color .15s,box-shadow .15s;}
 .login-alt-icon:hover{border-color:#1677FF;box-shadow:0 2px 8px rgba(22,119,255,.15);}
 .login-alt-icon:focus-visible{outline:2px solid #1677FF;outline-offset:2px;}
-.ding-mark{width:26px;height:26px;border-radius:8px;background:#1677FF;color:#fff;font-size:15px;
-  font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1;}
+.ding-mark{width:26px;height:26px;border-radius:8px;background:#1677FF;display:flex;align-items:center;justify-content:center;line-height:0;}
 .ding-qr{display:flex;align-items:center;justify-content:center;padding:10px 0 4px;min-height:228px;}
 .ding-qr img,.ding-qr canvas{border-radius:6px;}
 
