@@ -622,17 +622,21 @@ function renderLogin() {
   accInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwd.focus(); });
 
   const card = h('div', { class: 'login-card' }, [
-    h('div', { class: 'login-left' }, [
-      h('div', { class: 'login-logo' }, '纯'),
-      h('h2', {}, '纯玩世界'),
-      h('p', {}, '连锁门店任务管理平台 · 门店与管理公司协同工作台'),
-      h('div', { class: 'login-feats' }, [
-        h('div', { class: 'login-feat' }, [h('i', {}, '1'), h('span', {}, '每日 / 每周 / 每月必做任务一次设定长期循环，专项任务执行完即停')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '2'), h('span', {}, '任务与需求均支持文字 + 图片 + 链接，凭证留痕可追溯')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '3'), h('span', {}, '临期自动标黄、逾期标红，到期前与过期后双重提醒')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '4'), h('span', {}, '门店提需 → 管委会评估 → 派发责任人 → 门店确认，全程留痕')]),
-        h('div', { class: 'login-feat' }, [h('i', {}, '5'), h('span', {}, '门店完成情况与管理公司需求处理数据自动汇总，直接用于考核')])
-      ])
+    /* 左：钉钉扫码（电脑端主入口）；右：账号密码。窄屏隐藏左边，图标挪到表单下面 */
+    h('div', { class: 'login-qr-panel' }, [
+      h('div', { class: 'lqp-brand' }, [
+        h('span', { class: 'lqp-logo' }, '纯'),
+        h('b', {}, '纯玩世界'),
+      ]),
+      h('div', { class: 'lqp-title' }, '钉钉扫码登录'),
+      h('div', { class: 'lqp-qr', id: 'login-qr' }),
+      h('div', { class: 'lqp-alt' }, [
+        h('div', { class: 'login-alt-title' }, '其他方式登录'),
+        h('button', {
+          class: 'login-alt-icon', type: 'button', title: '钉钉登录', 'aria-label': '钉钉登录',
+          onclick: () => Api.dingStart(),
+        }, [dingMark()]),
+      ]),
     ]),
     h('div', { class: 'login-right' }, [
       h('h3', {}, '登录'),
@@ -641,11 +645,11 @@ function renderLogin() {
       h('div', { class: 'field' }, [h('label', {}, '密码'), pwd]),
       err,
       h('button', { class: 'btn btn-primary', style: { width: '100%', justifyContent: 'center', padding: '10px' }, onclick: doLogin }, '登录'),
-      h('div', { class: 'login-alt' }, [
+      h('div', { class: 'login-alt login-alt-inline' }, [
         h('div', { class: 'login-alt-title' }, '其他方式登录'),
         h('button', {
           class: 'login-alt-icon', type: 'button', title: '钉钉登录', 'aria-label': '钉钉登录',
-          onclick: () => openDingLogin(),
+          onclick: () => Api.dingStart(),
         }, [dingMark()]),
       ]),
       h('div', { class: 'login-hint' }, [
@@ -655,6 +659,22 @@ function renderLogin() {
     ])
   ]);
   wrap.appendChild(card);
+  paintLoginQr();
+}
+
+/* 登录页左侧二维码：授权地址由服务端生成（带 state），本地画成二维码 */
+function paintLoginQr() {
+  const box = document.getElementById('login-qr');
+  if (!box) return;
+  if (inDingTalk()) { box.appendChild(h('div', { class: 'fhint' }, '钉钉内可直接进入')); return; }
+  fetch(Api.base + '/api/auth/ding/start-url')
+    .then(r => r.json())
+    .then(j => {
+      if (!j || !j.ok) { box.appendChild(h('div', { class: 'fhint' }, '二维码暂不可用')); return; }
+      if (!window.QRCode) { box.appendChild(h('div', { class: 'fhint' }, '二维码组件没加载')); return; }
+      new QRCode(box, { text: j.url, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M });
+    })
+    .catch(() => box.appendChild(h('div', { class: 'fhint' }, '二维码暂不可用')));
 }
 
 /* ---------------- 修改密码 ---------------- */
