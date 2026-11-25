@@ -21,20 +21,15 @@ function wbSibling(name) {
 
 /* 工作台里的工具清单
    icon 取值见 ui.js 的 ICON_PATHS
-   ⚠️ 套餐中枢（taocan）、码表核对（meter）现在还在老路径；等第二批搬进 /tool/ 时，
-      把这两行的 wbSibling('taocan') / wbSibling('meter') 改成 wbSibling('tool/taocan') 等即可。 */
+   ⚠️ 码表核对（meter）现在还在老路径；等它搬进 /tool/ 时，
+      把这行的 wbSibling('meter') 改成 wbSibling('tool/meter') 即可。
+   2026-11-25：去掉「套餐中枢」卡片（用户要求，工作台只留在用的工具）。 */
 const WB_TOOLS = [
   {
     icon: 'chart',
     name: '账本看板',
     desc: '投放花费 · 渠道成交 · ROI',
     url: wbSibling('tool/ledger')
-  },
-  {
-    icon: 'board',
-    name: '套餐中枢',
-    desc: '套餐库 · 绑券 · 抖音上架',
-    url: wbSibling('taocan')
   },
   {
     icon: 'checklist',
