@@ -1915,6 +1915,7 @@ function openAssessSettingsModal(onDone) {
    页面被重新渲染（切回浏览器标签触发的静默刷新、保存后重绘）时不会跳回「门店与分区」。
    2026-11-25 用户反馈：点进「部门与账号」过一会儿自己跳回去。 */
 let _adminTab = 'store';
+let _dingSub = 'bind';   /* 钉钉提醒的子页：账号绑定 / 发送记录 */
 
 function pageAdmin() {
   if (!isAdmin()) return emptyNode('仅管理员可访问此页面', '🔒');
@@ -2150,19 +2151,20 @@ function pageAdmin() {
 
   /* ---------- 钉钉提醒 ---------- */
   const DING_AUTH = () => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('cwsj_token_v1') });
-  let dFilter = 'all', dq = '', dSub = 'bind';
+  let dFilter = 'all', dq = '';
   function paintDingTab() {
-    /* 子切换：账号绑定 / 发送记录（原「提醒记录」独立页并入这里） */
+    /* 子切换：账号绑定 / 发送记录（原「提醒记录」独立页并入这里）
+       dSub 放模块级：静默刷新重绘时不跳回「账号绑定」 */
     const subBar = h('div', { class: 'tabs chip-tabs m2-keep dg-sub' });
     const pane = h('div');
     [['bind', '账号绑定'], ['log', '发送记录']].forEach(([k, l]) => {
       subBar.appendChild(h('div', {
-        class: 'tab' + (dSub === k ? ' active' : ''), onclick: () => { dSub = k; paint(); }
+        class: 'tab' + (_dingSub === k ? ' active' : ''), onclick: () => { _dingSub = k; paint(); }
       }, l));
     });
     body.appendChild(subBar);
     body.appendChild(pane);
-    if (dSub === 'log') { paintNotifyLogTab(pane); return; }
+    if (_dingSub === 'log') { paintNotifyLogTab(pane); return; }
 
     let allRows = [];
     const countBar = h('div', { class: 'dg-counts' });
