@@ -29,6 +29,16 @@ const MOCK = process.env.DING_MOCK === '1';
    允许用 DING_LOGIN_APP_KEY / DING_LOGIN_APP_SECRET 单独指定，
    没配就回落到机器人那套。不经过 ding.loadEnv()，因为它强制要求 ROBOT_CODE。 */
 const ENV_FILE = process.env.DING_ENV_FILE || '/opt/cwsj/.ding.env';
+const CORP_FILE = require('path').join(process.env.DATA_DIR || '/opt/cwsj-stg/data', 'ding.corp');
+
+/* 企业 CorpId 缓存：OAuth 换 token 的响应里带 corpId，第一次登录时存下来。
+   从钉钉消息里的链接打开时 URL 上没有 corpid，免登签名要靠它。 */
+function saveCorp(id) {
+  try { fs.writeFileSync(CORP_FILE, String(id)); } catch (e) { /* 写不进去不影响登录 */ }
+}
+function cachedCorp() {
+  try { return fs.readFileSync(CORP_FILE, 'utf8').trim(); } catch (e) { return ''; }
+}
 
 function readEnvFile() {
   const out = {};
@@ -110,6 +120,9 @@ async function codeToDingUserid(code) {
   if (!r.ok || !j.accessToken) {
     throw new Error('换 accessToken 失败：' + (j.message || j.code || ('HTTP ' + r.status)));
   }
+  /* 顺手把企业 CorpId 存下来：从钉钉消息里的链接打开时 URL 上没有 corpid，
+     免登要靠这个缓存值签名，否则只能退回密码登录。 */
+  if (j.corpId) saveCorp(j.corpId);
 
   const me = await fetch(API2 + '/v1.0/contact/users/me', {
     headers: { 'x-acs-dingtalk-access-token': j.accessToken },
@@ -236,7 +249,7 @@ async function getJsapiTicket() {
 async function jsapiConfig(url, corpIdFromClient) {
   const corp = /^ding[0-9A-Za-z]{10,}$/.test(String(corpIdFromClient || ''))
     ? String(corpIdFromClient)
-    : CORP_ID;
+    : (CORP_ID || cachedCorp());
   if (!corp) throw new Error('没有配置 DING_CORP_ID（企业 CorpId），免登录用不了');
   const ticket = await getJsapiTicket();
   const nonceStr = crypto.randomBytes(8).toString('hex');
