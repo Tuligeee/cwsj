@@ -1911,17 +1911,22 @@ function openAssessSettingsModal(onDone) {
 /* =========================================================
    管理员后台（门店 / 分区 / 部门 / 账号 / 权限）
    ========================================================= */
+/* 管理员后台当前子页。放模块级而不是 pageAdmin 内部：
+   页面被重新渲染（切回浏览器标签触发的静默刷新、保存后重绘）时不会跳回「门店与分区」。
+   2026-11-25 用户反馈：点进「部门与账号」过一会儿自己跳回去。 */
+let _adminTab = 'store';
+
 function pageAdmin() {
   if (!isAdmin()) return emptyNode('仅管理员可访问此页面', '🔒');
   const wrap = h('div');
-  let tab = 'store';
+  let tab = _adminTab;
   const tabsBar = h('div', { class: 'tabs chip-tabs m2-keep' });
   const body = h('div');
 
   function paint() {
     clear(tabsBar);
     [['store', '门店与分区'], ['account', '部门与账号'], ['audit', '操作日志'], ['ding', '钉钉提醒']].forEach(([k, l]) => {
-      tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; paint(); } }, l));
+      tabsBar.appendChild(h('div', { class: 'tab' + (tab === k ? ' active' : ''), onclick: () => { tab = k; _adminTab = k; paint(); } }, l));
     });
     clear(body);
     if (tab === 'store') paintStoreTab();
